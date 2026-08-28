@@ -1,0 +1,10 @@
+{
+  "name": "globals-example-multi-window",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Three windows over one shared state, with a table of five thousand rows.",
+  "scripts": {
+    "start": "electron main.mjs"
+  }
+}

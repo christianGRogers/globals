@@ -21,6 +21,22 @@ export { ArenaOwner } from "./owner.js";
 export type { OwnerOptions, OwnerStats } from "./owner.js";
 export { ArenaReader, Snapshot } from "./reader.js";
 export type { ReaderOptions, SnapshotInfo } from "./reader.js";
+export { defineSchema } from "./schema.js";
+export type {
+  Draft,
+  Encodable,
+  Immutable,
+  OperationMap,
+  PayloadOf,
+  StateShape,
+  TypedDispatcher,
+  TypedReadableStore,
+  TypedWritableStore,
+} from "./schema.js";
+export { diffShallow, formatArena, reportArena, reportReader } from "./inspect.js";
+export type { ArenaReport, ReaderReport } from "./inspect.js";
+export { VersionHistory } from "./history.js";
+export type { HistoryEntry } from "./history.js";
 export { LivenessMonitor } from "./liveness.js";
 export type { LivenessOptions } from "./liveness.js";
 export { OwnerStore, ReaderStore } from "./store.js";
@@ -43,7 +59,7 @@ export {
 export type { EncodeContext, Slot, TypedArrayKind } from "./values.js";
 export { createDraft, finalizeState } from "./draft.js";
 export type { DraftContext, DraftNode } from "./draft.js";
-export { isView, readPath, viewSlot, viewValue } from "./view.js";
+export { isView, readPath, sameNode, viewSlot, viewValue } from "./view.js";
 export type { ViewContext } from "./view.js";
 export {
   EMPTY_NODE,
