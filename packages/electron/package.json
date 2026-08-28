@@ -19,8 +19,14 @@
       "import": "./dist/src/preload.js"
     }
   },
-  "files": ["dist/src", "README.md"],
-  "engines": { "node": ">=20.11.0" },
+  "files": [
+    "dist/src",
+    "preload.cjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "dependencies": {
     "@globals/core": "0.1.0"
   },
