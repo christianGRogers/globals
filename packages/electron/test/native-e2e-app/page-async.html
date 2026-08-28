@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>native e2e async page</title>
+<body>
+<script>
+// This window keeps its sandbox, so the test lives in the page: everything it can reach is
+// what the shipped preload-async.cjs exposes, which is the point of the check.
+(async () => {
+  const observation = { window: "plugin-async" };
+  try {
+    const api = window.globalsAsync;
+    observation.tier = api?.tier;
+    observation.hasSynchronousGet = typeof api?.get === "function";
+
+    await api.ready();
+    let pings = 0;
+    api.subscribe(() => pings++);
+
+    const whole = await api.read();
+    observation.asyncReadWorks =
+      typeof whole.value.counter === "number" &&
+      Array.isArray(whole.value.rows) &&
+      whole.value.rows.length === 500;
+
+    const committed = await api.dispatch("writeRow", { row: 11, value: 1100 });
+    const after = await api.read(["rows", 11, "value"]);
+    observation.committed = committed;
+    observation.afterValue = after.value;
+    observation.afterVersion = after.version;
+    observation.dispatchWorks = after.value === 1100 && after.version >= committed;
+
+    const deadline = Date.now() + 3000;
+    while (pings === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    observation.subscribeFired = pings > 0;
+  } catch (error) {
+    observation.error = `${error.name}: ${error.message}`;
+  }
+  window.e2eReport.send(observation);
+})();
+</script>

@@ -50,9 +50,14 @@ test("a dispatched operation is visible to a reader after its promise resolves",
 
   const before = source.version;
   await owner.dispatch("increment", { by: 3 });
-  await owner.dispatch("increment", { by: 4 });
+  const committed = await owner.dispatch("increment", { by: 4 });
 
   assert.equal(source.version, before + 2);
+  assert.equal(
+    committed,
+    source.version,
+    "a dispatch resolves with the region version, the currency readers deal in",
+  );
   assert.equal(source.select(["count"]), 7);
 
   source.close();

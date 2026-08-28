@@ -7,6 +7,10 @@ export const NATIVE_CHANNEL = "globals:native";
 export const HELLO = `${NATIVE_CHANNEL}:hello`;
 export const DISPATCH = `${NATIVE_CHANNEL}:dispatch`;
 export const COMMIT = `${NATIVE_CHANNEL}:commit`;
+// The asynchronous tier: a sandboxed window cannot map the region, so it reads by asking.
+// The names are duplicated as literals in preload-async.cjs, which a sandboxed preload's
+// restricted require cannot share with this module; keep them in step.
+export const READ = `${NATIVE_CHANNEL}:read`;
 
 /** What the main process answers a connecting window with. */
 export interface Hello {

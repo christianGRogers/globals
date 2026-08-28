@@ -11,7 +11,7 @@ import type { WebContents } from "electron";
 import { join } from "node:path";
 
 import type { PersistenceOptions } from "../persistence.js";
-import { COMMIT, DISPATCH, HELLO, type DispatchMessage, type Hello } from "./channel.js";
+import { COMMIT, DISPATCH, HELLO, READ, type DispatchMessage, type Hello } from "./channel.js";
 import {
   createNativeOwner,
   restoreNativeOwner,
@@ -20,6 +20,7 @@ import {
 } from "./owner-core.js";
 
 export type { NativeOperation, NativeOwner, NativeOwnerOptions } from "./owner-core.js";
+export { asyncPreloadPath } from "./paths.js";
 
 export interface StartNativeOwnerOptions<State>
   extends Omit<NativeOwnerOptions<State>, "regionPath" | "snapshots"> {
@@ -30,6 +31,11 @@ export interface StartNativeOwnerOptions<State>
    * under the app's userData directory.
    */
   persistence?: Omit<PersistenceOptions, "file"> & { file?: string };
+}
+
+function materialise(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  return JSON.parse(JSON.stringify(value)) as unknown;
 }
 
 export async function startNativeOwner<State>(
@@ -59,6 +65,16 @@ export async function startNativeOwner<State>(
   ipcMain.handle(DISPATCH, (_event, message: DispatchMessage) =>
     owner.dispatch(message.operation, message.payload),
   );
+  // The asynchronous tier. The lazy view is a Proxy and structured clone refuses proxies,
+  // so what crosses the wire is materialised first. This path is for windows that keep
+  // their sandbox; it reads by request and pays a round trip, which is the documented trade.
+  ipcMain.handle(READ, (_event, message?: { path?: readonly (string | number)[] }) => {
+    const value =
+      message?.path === undefined
+        ? owner.store.snapshot().toJSON()
+        : materialise(owner.store.select(message.path));
+    return { version: owner.version(), value };
+  });
 
   // The flush subscriber inside createNativeOwner registered first, so by the time this
   // runs the commit is already in the region and the ping cannot arrive ahead of the bytes.
@@ -82,6 +98,7 @@ export async function startNativeOwner<State>(
       app.removeListener("before-quit", onQuit);
       ipcMain.removeHandler(HELLO);
       ipcMain.removeHandler(DISPATCH);
+      ipcMain.removeHandler(READ);
       subscribers.clear();
       owner.close();
     },

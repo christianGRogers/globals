@@ -93,10 +93,14 @@ export function createNativeOwner<State>(options: NativeOwnerOptions<State>): Na
           ),
         );
       }
-      return store.update<State>((draft) => apply(draft, payload));
+      // The store resolves with the arena's internal version, which is not the currency
+      // readers deal in: they see region commit counts. The flush subscriber has already
+      // run by the time update resolves, so the region version here includes this commit,
+      // and a caller can hand it to any reader meaningfully.
+      return store.update<State>((draft) => apply(draft, payload)).then(() => region.version());
     },
     update(recipe) {
-      return store.update<State>(recipe);
+      return store.update<State>(recipe).then(() => region.version());
     },
     close() {
       unsubscribe();

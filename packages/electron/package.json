@@ -30,7 +30,8 @@
   "files": [
     "dist/src",
     "preload.cjs",
-    "README.md"
+    "README.md",
+    "preload-async.cjs"
   ],
   "engines": {
     "node": ">=20.11.0"
