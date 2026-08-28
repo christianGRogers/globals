@@ -100,6 +100,10 @@ export interface EncodeContext extends HamtContext {
   readonly allocated: number[];
   /** Nodes replaced on a copied path, retired when the superseded version is unreadable. */
   readonly retired: number[];
+  /** Strings this commit newly interned, so a rejected commit can release them. */
+  readonly interned: string[];
+  /** The bump pointer before this commit, so a rejected commit can rewind to it. */
+  readonly bumpBefore: number;
 }
 
 function isInt32(value: number): boolean {
@@ -122,9 +126,10 @@ export function encodeNumber(context: EncodeContext, value: number): Slot {
 }
 
 export function encodeString(context: EncodeContext, value: string): Slot {
-  // Interned, so the offset may be one the table already held. It is deliberately not added
-  // to the allocated list: releasing it would free a record other versions still reference.
-  return { tag: Tag.String, payload: context.strings.intern(value) };
+  // Interned, so the offset may be one the table already held. It goes on the interning
+  // journal rather than the allocated list: a rollback must release only the records this
+  // commit created, never one an earlier version already references.
+  return { tag: Tag.String, payload: context.strings.intern(value, context.interned) };
 }
 
 /**
@@ -182,8 +187,8 @@ function encodeDate(context: EncodeContext, value: Date): Slot {
 }
 
 function encodeRegExp(context: EncodeContext, value: RegExp): Slot {
-  const source = context.strings.intern(value.source);
-  const flags = context.strings.intern(value.flags);
+  const source = context.strings.intern(value.source, context.interned);
+  const flags = context.strings.intern(value.flags, context.interned);
   const offset = allocate(context, 2 * WORD);
   context.arena.words[offset / WORD] = source;
   context.arena.words[offset / WORD + 1] = flags;
@@ -302,8 +307,69 @@ function assertKeyable(slot: Slot, original: unknown): void {
  * can write a slot, so a wild offset is a reachable state rather than a bug that cannot
  * happen.
  */
-export function decodeValue(arena: SharedArena, slot: Slot): unknown {
+/**
+ * How deeply a decode will nest before it gives up.
+ *
+ * A corrupt offset can make a value contain itself, and that recursion is not covered by the
+ * depth bound inside a single trie: each level is a separate structure. Without this, a cycle
+ * across containers runs the stack out and produces a RangeError rather than a typed one.
+ */
+const MAX_DECODE_DEPTH = 512;
+
+/**
+ * A budget for one whole decode, measured in units of output rather than in calls.
+ *
+ * Counting calls is not enough, and the reason is worth writing down because it is the same
+ * shape as several bugs above. The depth bound and the per node budgets are all per call. A
+ * correct structure is a tree, but a corrupt one can be a graph, and a graph materialises a
+ * shared subtree once per reference. A trie whose entries all point at one large string
+ * record decodes that string once per entry: a few thousand references to a hundred kilobyte
+ * record is a gigabyte of output from a quarter megabyte arena.
+ *
+ * Note that this is not purely a corruption problem. A correct arena can do it too, because
+ * interned strings are shared in the arena and materialised separately by an eager decode.
+ * A structure with a thousand references to one long string legitimately decodes to a
+ * thousand copies. So the budget is generous rather than tight: it exists to turn an
+ * unbounded decode into a typed error, not to second guess a caller who really does want
+ * their data.
+ *
+ * The lazy read path has none of this to worry about, because it decodes what is touched.
+ */
+interface DecodeBudget {
+  remaining: number;
+}
+
+/** Sixteen times the arena, and never less than a megabyte of output. */
+function newBudget(arena: SharedArena): DecodeBudget {
+  return { remaining: Math.max(1 << 20, arena.byteLength * 16) };
+}
+
+function spend(budget: DecodeBudget, units: number): void {
+  budget.remaining -= units;
+  if (budget.remaining >= 0) return;
+  throw new ArenaCorruptError(
+    "decoding produced more output than the budget allows, which means the structure shares " +
+      "nodes far more heavily than its size can explain. Read through a snapshot view instead " +
+      "of materialising it, or raise the arena size if the data really is this shape.",
+  );
+}
+
+export function decodeValue(
+  arena: SharedArena,
+  slot: Slot,
+  depth = 0,
+  budget: DecodeBudget = newBudget(arena),
+): unknown {
   const { tag, payload } = slot;
+
+  if (depth > MAX_DECODE_DEPTH) {
+    throw new ArenaCorruptError(
+      `decoding nested past ${MAX_DECODE_DEPTH} levels, which means a cycle`,
+      { actual: depth },
+    );
+  }
+
+  spend(budget, 1);
 
   if (!isKnownTag(tag)) {
     throw new ArenaCorruptError(`slot carries an unknown tag ${tag}`, { actual: tag });
@@ -323,30 +389,45 @@ export function decodeValue(arena: SharedArena, slot: Slot): unknown {
     case Tag.Double:
       arena.checkBlock(payload, "double");
       return arena.floats[payload / 8];
-    case Tag.String:
-      return decodeString(arena, payload);
+    case Tag.String: {
+      const text = decodeString(arena, payload);
+      spend(budget, text.length);
+      return text;
+    }
     case Tag.Date:
       arena.checkBlock(payload, "date");
       return new Date(arena.floats[payload / 8] as number);
     case Tag.RegExp:
       return decodeRegExp(arena, payload);
-    case Tag.BigInt:
-      return decodeBigInt(arena, payload);
-    case Tag.TypedArray:
-      return decodeTypedArray(arena, payload);
+    case Tag.BigInt: {
+      const value = decodeBigInt(arena, payload);
+      spend(budget, arena.checkBlock(payload, "bigint"));
+      return value;
+    }
+    case Tag.TypedArray: {
+      const view = decodeTypedArray(arena, payload);
+      spend(budget, view.byteLength);
+      return view;
+    }
     case Tag.Object:
-      return decodeObject(arena, payload);
+      return decodeObject(arena, payload, depth, budget);
     case Tag.Array:
-      return vectorSlots(arena, payload).map((element) => decodeValue(arena, element));
+      return vectorSlots(arena, payload).map((element) =>
+        decodeValue(arena, element, depth + 1, budget),
+      );
     case Tag.Map:
       return new Map(
         hamtEntries(arena, payload).map((entry) => [
-          decodeValue(arena, entry.key),
-          decodeValue(arena, entry.value),
+          decodeValue(arena, entry.key, depth + 1, budget),
+          decodeValue(arena, entry.value, depth + 1, budget),
         ]),
       );
     case Tag.Set:
-      return new Set(hamtEntries(arena, payload).map((entry) => decodeValue(arena, entry.key)));
+      return new Set(
+        hamtEntries(arena, payload).map((entry) =>
+          decodeValue(arena, entry.key, depth + 1, budget),
+        ),
+      );
     case Tag.External:
       return new ExternalRef(payload);
     default:
@@ -354,13 +435,23 @@ export function decodeValue(arena: SharedArena, slot: Slot): unknown {
   }
 }
 
-function decodeObject(arena: SharedArena, node: number): Record<string, unknown> {
+function decodeObject(
+  arena: SharedArena,
+  node: number,
+  depth: number,
+  budget: DecodeBudget,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const entry of hamtEntries(arena, node)) {
     if (entry.key.tag !== Tag.String) {
       throw new ArenaCorruptError("object key is not a string", { actual: entry.key.tag });
     }
-    out[decodeString(arena, entry.key.payload)] = decodeValue(arena, entry.value);
+    out[decodeString(arena, entry.key.payload)] = decodeValue(
+      arena,
+      entry.value,
+      depth + 1,
+      budget,
+    );
   }
   return out;
 }
@@ -391,11 +482,19 @@ function decodeBigInt(arena: SharedArena, offset: number): bigint {
   if (length < 0 || 2 * WORD + length > byteSize) {
     throw new ArenaCorruptError(`bigint at ${offset} claims ${length} bytes`, { offset });
   }
-  let value = 0n;
+  if (length === 0) return 0n;
+
+  // Built through a hex string rather than by shifting a BigInt one byte at a time. The
+  // shifting version allocates a new BigInt per byte, each one longer than the last, so it is
+  // quadratic in both time and allocation. A corrupt length of a quarter megabyte made it
+  // churn tens of gigabytes and take the process down, which the fuzzer found as an out of
+  // memory crash rather than as an error.
   const bytes = arena.bytes;
-  for (let i = length - 1; i >= 0; i -= 1) {
-    value = (value << 8n) | BigInt(bytes[offset + 2 * WORD + i] as number);
+  const digits = new Array<string>(length);
+  for (let i = 0; i < length; i += 1) {
+    digits[length - 1 - i] = (bytes[offset + 2 * WORD + i] as number).toString(16).padStart(2, "0");
   }
+  const value = BigInt(`0x${digits.join("")}`);
   return negative ? -value : value;
 }
 
@@ -446,6 +545,8 @@ function decodeTypedArray(arena: SharedArena, offset: number): ArrayBufferView {
  * it performs, which is bounded rather than proportional to the structure.
  */
 export function collectBlocks(arena: SharedArena, slot: Slot, out: number[] = []): number[] {
+  // The writer only ever walks structures it built, so this needs no budget of its own. The
+  // walks it delegates to carry theirs.
   switch (slot.tag) {
     case Tag.Double:
     case Tag.Date:

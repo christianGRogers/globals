@@ -152,6 +152,69 @@ custom protocol, and cross origin isolation. That half is
 `packages/electron/test/chaos-app`, run by the electron-matrix workflow, and it has not yet
 been run. See [../spikes/RESULTS.md](../spikes/RESULTS.md).
 
+## Phase 5 hardening runs
+
+Same machine. Verified read mode is on by default in the soak, and off in the fuzzer so that
+the decoders are what gets exercised rather than the checksum.
+
+### Soak, 8 readers, 180 seconds
+
+```
+  commits             460202 (2552/s)
+  reads               9347750 (51832/s)
+  inconsistent reads  0
+  corruptions         0
+  stale snapshots     0
+  interned strings    136
+  live bytes          4944
+  stranded bytes      0
+  bump growth, 2nd half 0 bytes
+
+gate: PASS
+```
+
+### Chaos, 8 windows over 12 slots, 90 seconds
+
+```
+  corruptions         0
+  stale snapshots     1675
+  claimed slots left  0
+  minimum pinned      0
+  live bytes          4048
+  stranded bytes      0
+
+gate: PASS
+```
+
+### Fuzz, 20000 rounds
+
+```
+  iterations        20000 in 852.1s
+  decoded           56356
+  typed errors      63644
+  untyped errors    0
+  slow decodes      0
+
+    ArenaCorruptError        63644
+
+gate: PASS, every decode either succeeded or failed closed with a typed error
+```
+
+Run under a 384 MB heap cap on purpose. An unbounded decode shows up as a crash rather than
+as a slow test, and a generous cap hides it until continuous integration finds it later. The
+heap stayed between 8 and 41 MB throughout.
+
+Reading these results:
+
+- Zero untyped errors across 120 thousand decodes of deliberately corrupted arenas. Every
+  failure was an `ArenaCorruptError` raised by a check, not a `TypeError` from dereferencing
+  something.
+- The 56 thousand successful decodes are not a problem. Corrupting a value slot produces a
+  wrong value, which the trust model says is possible and which no amount of validation can
+  prevent.
+- `strandedBytes` remains zero under every workload measured, so compaction is still not
+  called for. See [hardening.md](hardening.md).
+
 ## The bug this run exists to prove is gone
 
 An earlier 12 second run reported 2 inconsistent reads in 4.17 million. Forced reclamation

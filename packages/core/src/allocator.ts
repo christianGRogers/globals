@@ -127,6 +127,44 @@ export class Allocator {
   }
 
   /**
+   * Rewind the bump pointer, discarding everything allocated above it.
+   *
+   * Called after a commit that failed part way, once its blocks have been freed. Freeing
+   * alone is not enough: the blocks go back to their size classes, so an arena that a failed
+   * write filled with sixteen byte records cannot then serve a forty byte request. There is
+   * no coalescing, so those small blocks never merge into a larger one and the store is stuck
+   * until it is restarted.
+   *
+   * Rewinding is safe here and nowhere else. There is exactly one writer, a commit is
+   * synchronous, and every block above the mark belongs to the commit being abandoned, so
+   * nothing published can reference one.
+   *
+   * The free lists are purged of anything above the mark, because a stale entry there would
+   * be handed out again by the free list while the bump allocator hands out the same bytes.
+   */
+  rewindTo(bumpPointer: number): void {
+    const arena = this.#arena;
+    if (bumpPointer >= arena.loadHeader(Header.BumpPointer)) return;
+
+    for (let index = 0; index < this.#freeLists.length; index += 1) {
+      const list = this.#freeLists[index] as number[];
+      const kept: number[] = [];
+      for (const offset of list) {
+        if (offset - BLOCK_HEADER_BYTES >= bumpPointer) {
+          this.#freeListBytes -= SIZE_CLASSES[index] as number;
+          // The block header above the mark goes away with the rewind.
+          this.#headerBytes -= BLOCK_HEADER_BYTES;
+          continue;
+        }
+        kept.push(offset);
+      }
+      this.#freeLists[index] = kept;
+    }
+
+    arena.storeHeader(Header.BumpPointer, bumpPointer);
+  }
+
+  /**
    * Bytes consumed from the arena that are neither live nor reusable.
    *
    * Block headers are excluded because they are fixed overhead rather than fragmentation.
@@ -149,6 +187,15 @@ export class Allocator {
     if (nextBump > arena.byteLength) {
       const needed = nextBump - arena.byteLength;
       if (!this.#grow?.(needed)) {
+        // Out of fresh arena. Before giving up, take a block from a larger size class. It
+        // wastes the difference, and wasting some memory beats refusing a write when there is
+        // memory sitting on a list one class up.
+        //
+        // This runs only under exhaustion, so the common path is unchanged. Without it, a
+        // rejected write that freed a thousand forty eight byte blocks could not be followed
+        // by a write that needed sixteen, which makes one bad write brick the store.
+        const scavenged = this.#scavenge(sizeClass);
+        if (scavenged !== undefined) return scavenged;
         throw new ArenaFullError(blockBytes + BLOCK_HEADER_BYTES, arena.byteLength);
       }
       // Growth succeeded, so the bump pointer is still valid and the buffer is longer.
@@ -164,6 +211,27 @@ export class Allocator {
     this.#liveBytes += blockBytes;
     this.#allocations += 1;
     return payloadOffset;
+  }
+
+  /**
+   * Take a block from a larger size class.
+   *
+   * The block keeps its own header, so freeing it later returns it to the list it came from
+   * rather than to the smaller one it was lent to. The difference between the request and the
+   * block is wasted until then, which is why this is a last resort rather than a policy.
+   */
+  #scavenge(sizeClass: number): number | undefined {
+    if (sizeClass === SIZE_CLASS_EXACT) return undefined;
+    for (let index = sizeClass; index < SIZE_CLASSES.length; index += 1) {
+      const offset = (this.#freeLists[index] as number[]).pop();
+      if (offset === undefined) continue;
+      const classBytes = SIZE_CLASSES[index] as number;
+      this.#freeListBytes -= classBytes;
+      this.#liveBytes += classBytes;
+      this.#allocations += 1;
+      return offset;
+    }
+    return undefined;
   }
 
   #writeBlockHeader(payloadOffset: number, sizeClass: number, blockBytes: number): void {

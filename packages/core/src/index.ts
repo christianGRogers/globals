@@ -37,6 +37,7 @@ export { diffShallow, formatArena, reportArena, reportReader } from "./inspect.j
 export type { ArenaReport, ReaderReport } from "./inspect.js";
 export { VersionHistory } from "./history.js";
 export type { HistoryEntry } from "./history.js";
+export { deepChecksum, headerChecksum, publishChecksum, verifyMode, verifyRoot } from "./verify.js";
 export { LivenessMonitor } from "./liveness.js";
 export type { LivenessOptions } from "./liveness.js";
 export { OwnerStore, ReaderStore } from "./store.js";

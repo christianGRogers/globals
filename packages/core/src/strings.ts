@@ -49,10 +49,18 @@ export class StringTable {
     return this.#interned.size;
   }
 
-  /** Return the offset of `text`, writing it into the arena the first time it is seen. */
-  intern(text: string): number {
+  /**
+   * Return the offset of `text`, writing it into the arena the first time it is seen.
+   *
+   * When a journal is supplied, strings this call newly interned are recorded on it. A commit
+   * that fails part way passes the journal to `forget` so the records it created are
+   * released. Without that, a rejected write would consume arena permanently, and a window
+   * that could request writes could exhaust the arena with rejected ones.
+   */
+  intern(text: string, journal?: string[]): number {
     const existing = this.#interned.get(text);
     if (existing !== undefined) return existing;
+    journal?.push(text);
 
     const offset = this.#allocator.allocate(stringRecordBytes(text.length));
     const words = this.#arena.words;
@@ -68,6 +76,21 @@ export class StringTable {
 
     this.#interned.set(text, offset);
     return offset;
+  }
+
+  /**
+   * Release strings interned during a commit that failed.
+   *
+   * Safe only for strings no published version references, which is exactly what the journal
+   * records: entries this commit created and no earlier one did.
+   */
+  forget(texts: readonly string[]): void {
+    for (const text of texts) {
+      const offset = this.#interned.get(text);
+      if (offset === undefined) continue;
+      this.#interned.delete(text);
+      this.#allocator.free(offset);
+    }
   }
 
   /** Bytes held by interned strings. Reported by the soak harness. */

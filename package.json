@@ -21,7 +21,9 @@
     "lint": "npm run typecheck && node scripts/check-docs.mjs",
     "spike": "node spikes/run-spike.mjs",
     "chaos": "npm run build && node packages/core/dist/test/soak/run-chaos.js",
-    "spike:electron": "node spikes/run-spike.mjs 01"
+    "spike:electron": "node spikes/run-spike.mjs 01",
+    "fuzz": "npm run build && node packages/core/dist/test/fuzz/run-fuzz.js",
+    "verify": "npm run build && node scripts/run-tests.mjs && node scripts/check-docs.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -21,6 +21,8 @@ function context(bytes = 1 << 18): EncodeContext {
     strings: new StringTable(arena, allocator),
     allocated: [],
     retired: [],
+    interned: [],
+    bumpBefore: 0,
   };
 }
 

@@ -5,6 +5,7 @@ import { Header } from "./layout.js";
 import { StaleSnapshotError } from "./errors.js";
 import { decodeValue, type Slot } from "./values.js";
 import { readPath, viewValue, type ViewContext } from "./view.js";
+import { verifyRoot } from "./verify.js";
 
 /**
  * How many times a reader retries the seqlock before it gives up on acquiring a fresh
@@ -236,6 +237,9 @@ export class ArenaReader {
       const payload = Atomics.load(words, Header.RootPayload);
       const versionId = Atomics.load(words, Header.VersionId);
       const ownerGeneration = Atomics.load(words, Header.OwnerGeneration);
+      // Inside the seqlock window, so the checksum belongs to the root just read rather than
+      // to whatever the writer published in the meantime.
+      const checksum = Atomics.load(words, Header.RootChecksum);
 
       if (Atomics.load(words, Header.Sequence) !== before) continue; // torn, retry
 
@@ -246,6 +250,10 @@ export class ArenaReader {
 
       if (versionId < this.reclaimFloor()) continue;
       if (!this.#ring.isLive(versionId)) continue;
+
+      // Verified read mode, once per version rather than once per read. A render loop that
+      // reads the same version a hundred times pays for this once.
+      verifyRoot(this.arena, { tag, payload }, versionId, checksum);
 
       const snapshot = new Snapshot(this, versionId, ownerGeneration, { tag, payload });
       this.#current = snapshot;
@@ -295,6 +303,9 @@ export class ArenaReader {
       throw new StaleSnapshotError(versionId, this.reclaimFloor());
     }
 
+    // A historical version is not verified: the published checksum covers the current root
+    // only, so there is nothing to compare a retained one against. Time travel is a debugging
+    // tool and this is a limit of it rather than an oversight.
     return new Snapshot(this, versionId, this.ownerGeneration(), {
       tag: entry.rootTag,
       payload: entry.rootPayload,

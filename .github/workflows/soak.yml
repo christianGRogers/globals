@@ -48,6 +48,12 @@ jobs:
           node packages/core/dist/test/soak/run-chaos.js
           --windows 8 --seconds 600
           --report soak-results/chaos-${{ matrix.os }}.json
+      - name: decoder fuzz
+        run: >
+          node packages/core/dist/test/fuzz/run-fuzz.js
+          --iterations 20000
+          --seed ${{ github.run_number }}
+          --report soak-results/fuzz-${{ matrix.os }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -84,3 +84,5 @@ jobs:
         run: node packages/core/dist/test/soak/run-soak.js --readers 4 --seconds 90
       - name: sixty second chaos run
         run: node packages/core/dist/test/soak/run-chaos.js --windows 6 --seconds 60
+      - name: decoder fuzz, short run
+        run: node packages/core/dist/test/fuzz/run-fuzz.js --iterations 1200
