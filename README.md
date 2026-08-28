@@ -65,6 +65,11 @@ A shared read of a double costs 418 ns on the reference machine, against 33 micr
 structured clone round trip. That is 79 times faster, and roughly 130 times the cost of a
 plain local property read.
 
+Measured through the whole stack in real Electron, over the native transport: 253 ns for the
+same read in a preload against a 35 µs real `ipcRenderer.invoke` round trip, which is 138
+times faster, and 873 ns when a page crosses the contextBridge for it, still 40 times faster
+and synchronous.
+
 The phase 0 spike modelled the read path and predicted 7.8 ns. The real path is slower because
 it validates the version on both sides of every decode and bounds checks every offset, neither
 of which is optional. The full numbers, the machine, and what was tuned are in
