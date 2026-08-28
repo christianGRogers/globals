@@ -15,18 +15,19 @@
  * Like spike 01, the verdict goes to a JSON file: an Electron main process on Windows is a
  * GUI subsystem binary and its console output never reaches the parent pipe.
  */
-import { app, BrowserWindow } from "electron";
+import { app } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
-import { GlobalsHost, prepare, preloadPath } from "../../dist/src/index.js";
+import { GlobalsHost, prepare } from "../../dist/src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-// packages/electron, because the pages import ../../dist/src directly. Serving the chaos-app
-// directory would 404 every one of those and the windows would load nothing.
-const packageRoot = join(here, "..", "..");
+// The repository root, because the pages import @globals/core through an import map and a
+// page can only reach what the served root contains.
+const repositoryRoot = join(here, "..", "..", "..", "..");
+const PAGES = "packages/electron/test/chaos-app";
 // Filtering argv down to things starting with two dashes looks like a reasonable way to
 // ignore the switches Electron injects. It is not: it drops the values as well, so
 // "--report path" parses as report being "--seconds". Tolerating unknown tokens is the
@@ -82,77 +83,87 @@ async function writeReport(verdict, failures) {
   );
 }
 
-function openWindow(id) {
-  const window = new BrowserWindow({
-    show: false,
-    webPreferences: {
-      preload: preloadPath(),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+async function openWindow(id) {
+  // The owner opens it, because a SharedArrayBuffer only crosses between an opener and the
+  // window it opened. See docs/adr/0002-window-open-handshake.md.
+  const window = await host.openWindow({
+    page: `${PAGES}/ui.html?id=${id}`,
+    name: `chaos-${id}`,
+    browserWindow: { show: false, width: 700, height: 500 },
   });
-  host.attach(window, { name: `chaos-${id}` });
-  void window.loadURL(host.url(`test/chaos-app/ui.html?id=${id}`));
   events.opened += 1;
   return window;
 }
 
-await app.whenReady();
+// Everything after this point runs inside a function rather than at module scope, and that
+// is not a style choice. In an ES module main entry, the ready event does not fire until the
+// entry module has finished evaluating, so a top level "await app.whenReady()" waits for an
+// event that is waiting for it. The process hangs with no error, on every platform.
+//
+// This cost a wrong diagnosis once already: the hang was read as "no interactive desktop"
+// when it was this.
+async function main() {
 
-host = await GlobalsHost.start({
-  root: packageRoot,
-  ownerPage: "test/chaos-app/owner.html",
+  host = await GlobalsHost.start({
+    root: repositoryRoot,
+    ownerPage: `${PAGES}/owner.html`,
+  });
+
+  const windows = new Map();
+  for (let id = 0; id < windowCount; id += 1) windows.set(id, await openWindow(id));
+
+  const finishAt = Date.now() + durationMs;
+
+  const disturb = setInterval(() => {
+    if (Date.now() >= finishAt) return;
+    const ids = [...windows.keys()];
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    if (id === undefined) return;
+    const window = windows.get(id);
+    const roll = Math.random();
+
+    if (roll < 0.4) {
+      window?.webContents.reload();
+      events.reloaded += 1;
+      return;
+    }
+    if (roll < 0.7) {
+      // A real renderer kill, which is the case the liveness detector exists for. The slot is
+      // still claimed and the epoch still pinned when the process disappears.
+      window?.webContents.forcefullyCrashRenderer();
+      events.killed += 1;
+      return;
+    }
+    window?.destroy();
+    windows.delete(id);
+    events.closed += 1;
+    setTimeout(() => {
+      void openWindow(id).then((replacement) => windows.set(id, replacement)).catch(() => undefined);
+    }, 400);
+  }, 500);
+
+  setTimeout(async () => {
+    clearInterval(disturb);
+    for (const window of windows.values()) {
+      if (!window.isDestroyed()) window.destroy();
+    }
+
+    // Give the liveness detector in the owner several passes to reap what the kills left.
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+
+    const failures = [];
+    await writeReport("PENDING", failures);
+
+    const bad = observations.filter((observation) => observation.inconsistent > 0);
+    if (bad.length > 0) failures.push(`${bad.length} windows reported an inconsistent read`);
+    if (observations.length === 0) failures.push("no window reported at all");
+    if (events.killed === 0) failures.push("no renderer was killed, so nothing was proved");
+
+    await writeReport(failures.length === 0 ? "PASS" : "FAIL", failures);
+    app.exit(failures.length === 0 ? 0 : 1);
+  }, durationMs + 500);
+}
+
+app.whenReady().then(() => {
+  void main();
 });
-
-const windows = new Map();
-for (let id = 0; id < windowCount; id += 1) windows.set(id, openWindow(id));
-
-const finishAt = Date.now() + durationMs;
-
-const disturb = setInterval(() => {
-  if (Date.now() >= finishAt) return;
-  const ids = [...windows.keys()];
-  const id = ids[Math.floor(Math.random() * ids.length)];
-  if (id === undefined) return;
-  const window = windows.get(id);
-  const roll = Math.random();
-
-  if (roll < 0.4) {
-    window?.webContents.reload();
-    events.reloaded += 1;
-    return;
-  }
-  if (roll < 0.7) {
-    // A real renderer kill, which is the case the liveness detector exists for. The slot is
-    // still claimed and the epoch still pinned when the process disappears.
-    window?.webContents.forcefullyCrashRenderer();
-    events.killed += 1;
-    return;
-  }
-  window?.destroy();
-  windows.delete(id);
-  events.closed += 1;
-  setTimeout(() => windows.set(id, openWindow(id)), 400);
-}, 500);
-
-setTimeout(async () => {
-  clearInterval(disturb);
-  for (const window of windows.values()) {
-    if (!window.isDestroyed()) window.destroy();
-  }
-
-  // Give the liveness detector in the owner several passes to reap what the kills left.
-  await new Promise((resolve) => setTimeout(resolve, 4000));
-
-  const failures = [];
-  await writeReport("PENDING", failures);
-
-  const bad = observations.filter((observation) => observation.inconsistent > 0);
-  if (bad.length > 0) failures.push(`${bad.length} windows reported an inconsistent read`);
-  if (observations.length === 0) failures.push("no window reported at all");
-  if (events.killed === 0) failures.push("no renderer was killed, so nothing was proved");
-
-  await writeReport(failures.length === 0 ? "PASS" : "FAIL", failures);
-  app.exit(failures.length === 0 ? 0 : 1);
-}, durationMs + 500);

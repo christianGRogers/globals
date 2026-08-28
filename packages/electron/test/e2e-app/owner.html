@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>e2e owner</title>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
+<script type="module">
+import { startOwner } from "../../dist/src/owner.js";
+
+const runtime = startOwner({
+  initial: {
+    counter: 0,
+    rows: Array.from({ length: 500 }, (_u, id) => ({ id, label: `row ${id}`, value: 0 })),
+    observations: {},
+  },
+  operations: {
+    setRow(draft, payload) {
+      const row = draft.rows[payload.id];
+      if (row) row.value = payload.value;
+    },
+    bump(draft, payload) {
+      draft.counter += payload.by;
+    },
+    observe(draft, payload) {
+      draft.observations[payload.name] = payload;
+    },
+  },
+  arena: { byteLength: 1 << 20, maxByteLength: 1 << 24, maxReaders: 16, retainedVersions: 32 },
+  liveness: { intervalMs: 500, missesBeforeDead: 6 },
+  asyncOnly: (name) => name.startsWith("untrusted-"),
+});
+
+window.__runtime = runtime;
+console.log("owner started");
+</script>

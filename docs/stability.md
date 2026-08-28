@@ -4,13 +4,16 @@ What this project promises about compatibility, and what it does not.
 
 ## Current status
 
-**0.1.0, pre-release.** The API will change. The arena layout will change. Do not build
-something you cannot afford to revise on a project that has not yet cleared its own
-feasibility gate.
+**The feasibility gate has failed. Nothing here should be adopted for the purpose the project
+was started for.**
 
-The gate in question is spike 01, which proves a `SharedArrayBuffer` reaches a sandboxed
-renderer. It has not been run on a machine with a display. See
-[../spikes/RESULTS.md](../spikes/RESULTS.md).
+A `SharedArrayBuffer` does not cross a renderer process boundary in Electron 33 by any
+mechanism measured. See [../spikes/RESULTS.md](../spikes/RESULTS.md) for the measurements and
+[adr/0002-window-open-handshake.md](adr/0002-window-open-handshake.md) for what it means.
+
+The core package is a different matter. It is runtime agnostic, it has no Electron dependency,
+and it is tested to the standard the plan asked for. It survives into whichever off ramp the
+project takes.
 
 ## Supported Electron range
 

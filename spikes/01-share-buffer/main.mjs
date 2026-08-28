@@ -56,6 +56,10 @@ function serve() {
 }
 
 const loadFailures = [];
+const rendererLog = [];
+// The claim the project rests on is cross process sharing. If every window is in one renderer
+// process, a buffer that transfers proves nothing a plain object in one heap would not.
+const processIds = {};
 
 function createWindow({ page, show, title }) {
   const window = new BrowserWindow({
@@ -76,6 +80,16 @@ function createWindow({ page, show, title }) {
   // load that finishes first never resolves the promise, the spike hangs, and the watchdog
   // reports a gate failure that says nothing about whether the buffer can be shared. A
   // spurious failure on a go or no go decision is worse than no result.
+  // A renderer that throws is silent from out here, and a spike that cannot say why it saw
+  // nothing is not much of a diagnostic. Console output and preload failures are captured
+  // into the report.
+  window.webContents.on("console-message", (_event, level, message, line, source) => {
+    rendererLog.push(`[${title}] ${message} (${source}:${line})`);
+  });
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    rendererLog.push(`[${title}] preload failed: ${preloadPath}: ${error.message}`);
+  });
+
   const loaded = new Promise((resolve) => {
     window.webContents.once("did-finish-load", () => resolve());
     window.webContents.once("did-fail-load", (_event, code, description, url) => {
@@ -85,6 +99,9 @@ function createWindow({ page, show, title }) {
   });
 
   void window.loadURL(`${SCHEME}://spike/${page}`);
+  loaded.then(() => {
+    processIds[title] = window.webContents.getOSProcessId();
+  });
   return { window, loaded };
 }
 
@@ -117,6 +134,8 @@ async function writeReport(checks, verdict) {
           platform: process.platform,
           arch: process.arch,
           at: new Date().toISOString(),
+          rendererLog,
+          processIds,
           reports,
           checks,
           verdict,
@@ -141,6 +160,14 @@ function finish() {
     { name: "readers observed the owner write", pass: readers.every((r) => r.sawOwnerValue) },
     { name: "owner observed a reader write", pass: owner?.sawReaderValue === true },
     { name: "grow() was observed by readers", pass: readers.every((r) => r.observedGrowth) },
+    {
+      name: "the owner and the readers are in different OS processes",
+      pass:
+        typeof processIds.owner === "number" &&
+        typeof processIds["ui-a"] === "number" &&
+        processIds.owner !== processIds["ui-a"],
+      detail: JSON.stringify(processIds),
+    },
   ];
 
   console.log("");
@@ -158,47 +185,59 @@ function finish() {
   );
 }
 
-await app.whenReady();
-serve();
+// Everything after this point runs inside a function rather than at module scope, and that
+// is not a style choice. In an ES module main entry, the ready event does not fire until the
+// entry module has finished evaluating, so a top level "await app.whenReady()" waits for an
+// event that is waiting for it. The process hangs with no error, on every platform.
+//
+// This cost a wrong diagnosis once already: the hang was read as "no interactive desktop"
+// when it was this.
+async function main() {
+  serve();
 
-// The watchdog is armed before anything can block, because the failure this spike most
-// needs to report is a window that never finishes loading. Arming it after the load would
-// mean that failure produces no verdict at all, which is what happened the first time.
-const watchdog = setTimeout(() => {
-  const detail =
-    loadFailures.length > 0
-      ? loadFailures.join("; ")
-      : `${reports.length} of ${expectedReports || 3} windows reported`;
-  console.error(`\ngate: FAIL, timed out. ${detail}`);
-  void writeReport([{ name: "every window loaded and reported", pass: false, detail }], "FAIL").then(
-    () => app.exit(1),
-  );
-}, 20_000);
+  // The watchdog is armed before anything can block, because the failure this spike most
+  // needs to report is a window that never finishes loading. Arming it after the load would
+  // mean that failure produces no verdict at all, which is what happened the first time.
+  const watchdog = setTimeout(() => {
+    const detail =
+      loadFailures.length > 0
+        ? loadFailures.join("; ")
+        : `${reports.length} of ${expectedReports || 3} windows reported`;
+    console.error(`\ngate: FAIL, timed out. ${detail}`);
+    void writeReport([{ name: "every window loaded and reported", pass: false, detail }], "FAIL").then(
+      () => app.exit(1),
+    );
+  }, 20_000);
 
-const owner = createWindow({ page: "owner.html", show: false, title: "owner" });
-const readers = [
-  createWindow({ page: "ui.html?name=ui-a", show: true, title: "ui-a" }),
-  createWindow({ page: "ui.html?name=ui-b", show: true, title: "ui-b" }),
-];
-const readerWindows = readers.map((entry) => entry.window);
-expectedReports = 1 + readers.length;
+  const owner = createWindow({ page: "owner.html", show: false, title: "owner" });
+  const readers = [
+    createWindow({ page: "ui.html?name=ui-a", show: true, title: "ui-a" }),
+    createWindow({ page: "ui.html?name=ui-b", show: true, title: "ui-b" }),
+  ];
+  const readerWindows = readers.map((entry) => entry.window);
+  expectedReports = 1 + readers.length;
 
-await Promise.all([owner, ...readers].map((entry) => entry.loaded));
+  await Promise.all([owner, ...readers].map((entry) => entry.loaded));
 
-if (loadFailures.length > 0) {
-  clearTimeout(watchdog);
-  console.error(`\ngate: FAIL, ${loadFailures.join("; ")}`);
-  void writeReport(
-    loadFailures.map((detail) => ({ name: "window loaded", pass: false, detail })),
-    "FAIL",
-  ).then(() => app.exit(1));
-} else {
-  // One port pair per reader. The owner keeps one end of each.
-  for (const reader of readerWindows) {
-    const { port1, port2 } = new MessageChannelMain();
-    owner.window.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
-    reader.webContents.postMessage("spike:port", { peer: "owner" }, [port2]);
+  if (loadFailures.length > 0) {
+    clearTimeout(watchdog);
+    console.error(`\ngate: FAIL, ${loadFailures.join("; ")}`);
+    void writeReport(
+      loadFailures.map((detail) => ({ name: "window loaded", pass: false, detail })),
+      "FAIL",
+    ).then(() => app.exit(1));
+  } else {
+    // One port pair per reader. The owner keeps one end of each.
+    for (const reader of readerWindows) {
+      const { port1, port2 } = new MessageChannelMain();
+      owner.window.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
+      reader.webContents.postMessage("spike:port", { peer: "owner" }, [port2]);
+    }
   }
+
+  console.log(`spike 01, Electron ${process.versions.electron}, Chromium ${process.versions.chrome}\n`);
 }
 
-console.log(`spike 01, Electron ${process.versions.electron}, Chromium ${process.versions.chrome}\n`);
+app.whenReady().then(() => {
+  void main();
+});

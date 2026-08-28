@@ -13,6 +13,13 @@
 <div id="history"></div>
 <pre id="diff" style="background: #f4f4f4; padding: 8px; margin-top: 8px"></pre>
 
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
 import { connect } from "../../../packages/electron/dist/src/renderer.js";
 import {
@@ -22,7 +29,7 @@ import {
   reportReader,
 } from "../../../packages/core/dist/src/index.js";
 
-const store = await connect();
+const store = await connect({ name: "stats" });
 if (store.tier !== "shared") throw new Error("this window expected the shared tier");
 
 // A debug panel browses history through its own reader. A reader owns one epoch slot, so

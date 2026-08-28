@@ -31,6 +31,24 @@ const SPIKES = {
     entry: "03-memory-cage/README.md",
     gate: "napi_create_external_arraybuffer copies rather than shares",
   },
+  "05": {
+    name: "share a buffer through window.open",
+    runtime: "electron",
+    entry: "05-window-open/main.mjs",
+    gate: "a SharedArrayBuffer survives a post to a window opened by the owner",
+  },
+  "06": {
+    name: "share a buffer through a BroadcastChannel",
+    runtime: "electron",
+    entry: "06-broadcast-channel/main.mjs",
+    gate: "a SharedArrayBuffer survives a broadcast to same origin contexts",
+  },
+  "07": {
+    name: "let a SharedWorker own the buffer",
+    runtime: "electron",
+    entry: "07-shared-worker/main.mjs",
+    gate: "a SharedWorker can hand its buffer to every window that connects",
+  },
   "04": {
     name: "read latency",
     runtime: "node",
@@ -57,7 +75,7 @@ async function runElectron(spike, rest) {
   // Delegates to the shared launcher. Resolving the binary and printing a verdict file are
   // the same problem here as anywhere else, and keeping a second copy of the answer is how
   // the Windows spawn bug would come back.
-  const reportPath = join(here, "01-share-buffer", "spike01-result.json");
+  const reportPath = join(here, spike.entry.split("/")[0], `spike${command}-result.json`);
   return launch({
     entry: join(here, spike.entry),
     reportPath,

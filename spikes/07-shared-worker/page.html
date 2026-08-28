@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>shared worker page</title>
+<body>
+<script type="module">
+const name = new URLSearchParams(location.search).get("name") ?? "page";
+const log = (line) => console.log(`${name}: ${line}`);
+log(`crossOriginIsolated=${self.crossOriginIsolated}, SharedWorker=${typeof SharedWorker}`);
+
+if (typeof SharedWorker === "undefined") {
+  window.spike.report({ window: name, sharedWorkerAvailable: false });
+} else {
+  let worker;
+  try {
+    worker = new SharedWorker("worker.js", { name: "globals-owner" });
+  } catch (error) {
+    log("CONSTRUCTING THE WORKER THREW: " + error.name + ": " + error.message);
+    window.spike.report({ window: name, sharedWorkerAvailable: true, constructThrew: error.message });
+    throw error;
+  }
+  worker.addEventListener("error", (event) => {
+    log("WORKER ERROR: " + (event.message || "no message") + " at " + (event.filename || "?"));
+    window.spike.report({ window: name, sharedWorkerAvailable: true, workerError: String(event.message || "unknown") });
+  });
+  worker.port.addEventListener("messageerror", () => {
+    log("MESSAGEERROR: the payload could not be deserialised here");
+    window.spike.report({ window: name, received: false, deserialised: false });
+  });
+  worker.port.addEventListener("message", (event) => {
+    if (event.data.kind === "post-threw") {
+      log(`WORKER POST THREW: ${event.data.message}`);
+      window.spike.report({ window: name, postThrew: event.data.message });
+      return;
+    }
+    if (event.data.kind === "buffer") {
+      const sab = event.data.sab;
+      const i32 = new Int32Array(sab);
+      const sawOwnerValue = Atomics.load(i32, 0) === 0xC0FFEE;
+      log(`RECEIVED ${sab.byteLength} bytes, owner value seen: ${sawOwnerValue}, connections=${event.data.connections}`);
+      Atomics.store(i32, 1, 0xFACE);
+      worker.port.postMessage("read-back");
+      window.__sawOwnerValue = sawOwnerValue;
+      return;
+    }
+    if (event.data.kind === "read-back") {
+      log(`the worker read back 0x${event.data.value.toString(16)}`);
+      window.spike.report({
+        window: name,
+        crossOriginIsolated: self.crossOriginIsolated === true,
+        sandboxed: window.spike.sandboxed,
+        sharedWorkerAvailable: true,
+        received: true,
+        sawOwnerValue: window.__sawOwnerValue === true,
+        workerSawOurWrite: event.data.value === 0xFACE,
+      });
+    }
+  });
+  worker.port.start();
+}
+</script>

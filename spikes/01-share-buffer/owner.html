@@ -4,6 +4,14 @@
 <body>
 <pre id="log"></pre>
 <script type="module">
+const onPort = (handler) => {
+  // The port arrives as a transfer on a window message, not through the context bridge.
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data || !event.data.spikePort) return;
+    handler(event.ports[0], event.data.spikePort);
+  });
+};
+
 const log = (line) => { document.getElementById("log").textContent += line + "\n"; };
 
 // Growable so the spike can answer whether grow() is observed by processes that already
@@ -22,7 +30,7 @@ const ports = [];
 let sawReaderValue = false;
 let acknowledged = 0;
 
-window.spike.onPort((port) => {
+onPort((port) => {
   port.addEventListener("message", (event) => {
     if (event.data.kind === "wrote") {
       const value = Atomics.load(new Int32Array(sab), READER_VALUE);
@@ -45,9 +53,32 @@ window.spike.onPort((port) => {
     }
   });
 
+  // A message whose payload cannot be deserialised in this context is dropped and arrives
+  // as messageerror instead. That is exactly how a refused SharedArrayBuffer transfer looks
+  // from the receiving side, so it is the diagnostic that matters here.
+  port.addEventListener("messageerror", (event) => {
+    console.log(`MESSAGEERROR: a message could not be deserialised here, data=${String(event.data)}`);
+  });
+  console.log(`crossOriginIsolated=${self.crossOriginIsolated}, SharedArrayBuffer=${typeof SharedArrayBuffer}`);
   port.start();
   ports.push(port);
-  port.postMessage({ kind: "buffer", sab });
+  // Two probes, because "a SharedArrayBuffer will not transfer" and "a growable
+  // SharedArrayBuffer will not transfer" are very different answers. The first ends the
+  // project. The second just means the arena is sized at bootstrap.
+  const plain = new SharedArrayBuffer(64);
+  new Int32Array(plain)[0] = 0x1234;
+  try {
+    port.postMessage({ kind: "probe-plain", plain });
+    console.log("posted a plain SharedArrayBuffer");
+  } catch (error) {
+    console.log(`POSTING PLAIN THREW: ${error.name}: ${error.message}`);
+  }
+  try {
+    port.postMessage({ kind: "buffer", sab });
+    console.log(`posted the growable buffer to peer ${ports.length}`);
+  } catch (error) {
+    console.log(`POSTING GROWABLE THREW: ${error.name}: ${error.message}`);
+  }
   log(`handed the buffer to peer ${ports.length}`);
 
   if (ports.length === 2) {

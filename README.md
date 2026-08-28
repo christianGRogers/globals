@@ -3,10 +3,16 @@
 Synchronous reads of shared application state across Electron processes, built on one region
 of real shared memory.
 
-> **Status: 0.1.0, pre-release.** The feasibility gate that decides whether this can work at
-> all has not been cleared on a machine with a display. Run it yourself with `npm run gate`,
-> which takes about a second. Read [docs/stability.md](docs/stability.md) and
-> [docs/trust-model.md](docs/trust-model.md) before adopting it.
+> **Status: the feasibility gate has failed. Do not adopt this.**
+>
+> A `SharedArrayBuffer` does not cross a renderer process boundary in Electron 33 by any
+> mechanism measured. The one that delivers the buffer, `window.open`, puts every window in a
+> single renderer process, which is not the problem this library exists to solve. The
+> measurements, including process ids, are in [spikes/RESULTS.md](spikes/RESULTS.md), and the
+> options are the off ramps in [docs/plan.md](docs/plan.md).
+>
+> The core is unaffected and runs: it is runtime agnostic, tested, and reusable in any of the
+> off ramps. What fails is the Electron handshake.
 
 ## The contract
 

@@ -1,23 +1,24 @@
 import { createOwnerRuntime, type OwnerRuntime, type OwnerRuntimeOptions } from "./owner-runtime.js";
+import { CHANNEL } from "./messages.js";
 
 /**
  * What the hidden owner page calls.
  *
- * It wires the runtime to the two things only a real window has: the ports the main process
- * hands over, and the request channel the main process uses for its own reads and writes.
+ * It wires the runtime to the two things only this window can do: open the windows that will
+ * share the buffer, and answer the main process.
  */
 
 interface OwnerBridge {
-  onPort(listener: (port: MessagePort, payload: { name: string }) => void): () => void;
-  ready(): void;
-  onMainRequest(listener: (channel: string, request: { id: number; payload: unknown }) => void): void;
-  replyToMain(reply: { id: number; value?: unknown; error?: { message: string } }): void;
+  onMainRequest(
+    listener: (channel: string, request: { id: number; payload: unknown }) => void,
+  ): void;
+  reply(channel: string, message: unknown): void;
   channels: Record<string, string>;
   environment: { sandboxed: boolean; contextIsolated: boolean };
 }
 
 function bridge(): OwnerBridge {
-  const found = (globalThis as { __globals?: OwnerBridge }).__globals;
+  const found = (globalThis as { __globalsOwner?: OwnerBridge }).__globalsOwner;
   if (found === undefined) {
     throw new Error(
       "the globals preload is not installed on the owner window. Pass preloadPath() as the " +
@@ -27,16 +28,7 @@ function bridge(): OwnerBridge {
   return found;
 }
 
-export interface StartOwnerOptions<State> extends OwnerRuntimeOptions<State> {
-  /**
-   * Called after every commit with the detached state and its version.
-   *
-   * Wire it to the host persistence bridge if the application persists state. It runs on
-   * every commit, so it must not do work proportional to the state, which is why the value
-   * handed over is already materialised once rather than re-decoded per listener.
-   */
-  onCommit?: (version: number, snapshot: unknown) => void;
-}
+export type StartOwnerOptions<State> = OwnerRuntimeOptions<State>;
 
 /**
  * Start the owner runtime inside the hidden window.
@@ -65,26 +57,32 @@ export function startOwner<State>(options: StartOwnerOptions<State>): OwnerRunti
 
   const runtime = createOwnerRuntime(options);
 
-  api.onPort((port, payload) => {
-    runtime.bind(port as unknown as Parameters<typeof runtime.bind>[0], payload.name);
-  });
-
   api.onMainRequest((channel, request) => {
     try {
-      if (channel === api.channels.MainRead) {
-        api.replyToMain({ id: request.id, value: runtime.read() });
+      if (channel === CHANNEL.OpenWindow) {
+        const { url, name, features } = request.payload as {
+          url: string;
+          name: string;
+          features?: string;
+        };
+        const opened = runtime.openWindow(url, name, features);
+        api.reply(CHANNEL.OpenResult, { id: request.id, value: opened });
+        return;
+      }
+      if (channel === CHANNEL.MainRead) {
+        api.reply(CHANNEL.MainReply, { id: request.id, value: runtime.read() });
         return;
       }
       const { operation, payload } = request.payload as { operation: string; payload: unknown };
-      api.replyToMain({ id: request.id, value: runtime.apply(operation, payload) });
+      api.reply(CHANNEL.MainReply, { id: request.id, value: runtime.apply(operation, payload) });
     } catch (error) {
-      api.replyToMain({
+      const reply = channel === CHANNEL.OpenWindow ? CHANNEL.OpenResult : CHANNEL.MainReply;
+      api.reply(reply, {
         id: request.id,
         error: { message: error instanceof Error ? error.message : String(error) },
       });
     }
   });
 
-  api.ready();
   return runtime;
 }
