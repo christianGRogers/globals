@@ -16,14 +16,38 @@ Recorded runs, with the machine described, so the numbers can be reproduced or d
 
 | Spike | Status | Verdict |
 | --- | --- | --- |
-| 01 share a buffer | Not yet run | Blocked on a local Electron install and a display |
+| 01 share a buffer | Attempted, could not run | Electron installs and its main module loads, but the app never reaches ready in this session |
 | 02 atomics torture | Run | PASS |
 | 03 memory cage | Not yet run | Blocked on a C toolchain, conclusion documented from the V8 design |
 | 04 read latency | Run, Node arm only | PASS with a large margin |
 
-Spikes 01 and 03 need a runtime that this machine does not currently have configured.
-Neither is guessed at below. Their rows say not yet run, and the project gate is not
-considered cleared until spike 01 has been run on each supported Electron major.
+Spike 03 needs a C toolchain that this machine does not have configured. Spike 01 was
+attempted and could not complete, for a reason worth writing down rather than summarising
+as not run. Neither result is guessed at below, and the project gate is not considered
+cleared until spike 01 has been run on each supported Electron major.
+
+## Spike 01, attempted and blocked
+
+Electron 33.4.11 installs, including its binary. The spike main module loads and executes:
+a probe that writes a file from the module body produced output, so the ESM entry point and
+the Electron main process both start.
+
+It then stops at `app.whenReady()`, which never resolves. Adding `--no-sandbox`,
+`--disable-gpu`, and `--disable-software-rasterizer` changed nothing. The session running
+these commands has no interactive desktop, and Electron does not reach ready without one.
+
+Two things came out of the attempt, and both are kept:
+
+- The spike now writes its verdict to a JSON file and the runner prints it. An Electron main
+  process on Windows is a GUI subsystem binary, so its console output never reaches the
+  parent pipe. Without the file the spike could run, decide, and report nothing at all.
+- The watchdog is armed before the window loads rather than after. The first version armed
+  it after awaiting `did-finish-load`, so the one failure the spike most needs to report,
+  a window that never loads, produced no verdict.
+
+The route to actually clearing the gate is the `electron-matrix` workflow, which runs the
+spike on macOS, Windows, and Linux under xvfb across three Electron majors. Until one of
+those runs is recorded here, the buffer sharing condition is unproven.
 
 ## Spike 02, atomics torture
 
@@ -96,7 +120,7 @@ Reading of this result:
 
 | Gate condition | Verdict |
 | --- | --- |
-| A buffer reaches a sandboxed renderer | Unproven, spike 01 outstanding |
+| A buffer reaches a sandboxed renderer | Unproven, spike 01 cannot run in this session |
 | Reads at least 50 times faster than an IPC round trip | Cleared, measured 4306 times |
 | Atomics hold across contexts | Cleared for threads, unproven across renderer processes |
 

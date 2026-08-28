@@ -4,7 +4,13 @@ import { ReaderTable } from "./readers.js";
 import { RetainedRing } from "./retained.js";
 import { StringTable } from "./strings.js";
 import { Header, VerifyMode, type VerifyModeValue } from "./layout.js";
-import { collectBlocks, encodeValue, type EncodeContext, type Slot } from "./values.js";
+import {
+  collectBlocks,
+  decodeValue,
+  encodeValue,
+  type EncodeContext,
+  type Slot,
+} from "./values.js";
 import { createDraft, finalizeState } from "./draft.js";
 import { Tag } from "./tags.js";
 import { GlobalsError } from "./errors.js";
@@ -217,6 +223,17 @@ export class ArenaOwner {
     }
 
     return this.#install(slot, context.retired);
+  }
+
+  /**
+   * The current state as a detached plain value.
+   *
+   * The owner reads through this rather than through a reader, because it already knows the
+   * current root and does not need to pin anything: nothing can reclaim a version while the
+   * only writer is inside a synchronous method.
+   */
+  readSnapshot(): unknown {
+    return decodeValue(this.arena, this.#currentSlot);
   }
 
   #newContext(): EncodeContext {

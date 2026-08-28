@@ -61,7 +61,7 @@ in [docs/benchmarks.md](docs/benchmarks.md).
 | `packages/svelte` | Svelte store adapter |
 | `spikes` | Phase 0 feasibility spikes, throwaway by design |
 | `benchmarks` | The reproducible harness behind the numbers in the docs |
-| `docs` | Contract, architecture, trust model, object layer, reclamation, decision records |
+| `docs` | Contract, architecture, trust model, object layer, reclamation, Electron, decision records |
 
 ## Development
 

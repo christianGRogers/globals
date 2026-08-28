@@ -1,0 +1,37 @@
+{
+  "name": "@globals/electron",
+  "version": "0.1.0",
+  "description": "Electron integration: the hidden owner window, the bootstrap handshake, window lifecycle, and persistence.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./renderer": {
+      "types": "./dist/src/renderer.d.ts",
+      "import": "./dist/src/renderer.js"
+    },
+    "./preload": {
+      "types": "./dist/src/preload.d.ts",
+      "import": "./dist/src/preload.js"
+    }
+  },
+  "files": ["dist/src", "README.md"],
+  "engines": { "node": ">=20.11.0" },
+  "dependencies": {
+    "@globals/core": "0.1.0"
+  },
+  "peerDependencies": {
+    "electron": ">=28 <35"
+  },
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianGRogers/globals.git",
+    "directory": "packages/electron"
+  }
+}
