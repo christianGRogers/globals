@@ -50,12 +50,13 @@ jobs:
       - run: npm ci
       - name: build the addon
         shell: bash
+        # Through the package script, not npx: npm exec inside a workspace member resets the
+        # working directory to the member's root, and gyp then cannot find binding.gyp.
         run: |
-          cd packages/shm/native
           if [ -n "${{ matrix.target_arch }}" ]; then
-            npx node-gyp rebuild --arch=${{ matrix.target_arch }}
+            npm run build:native --workspace @globals/shm -- --arch=${{ matrix.target_arch }}
           else
-            npx node-gyp rebuild
+            npm run build:native
           fi
       - run: npm run build
       - name: smoke test the binary this machine built

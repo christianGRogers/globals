@@ -45,6 +45,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm install --no-save electron@^${{ matrix.electron }}
+      - name: configure the SUID sandbox helper the Linux image requires
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: run the sharing spike, expecting the recorded FAIL
         shell: bash
         run: |
@@ -57,6 +62,9 @@ jobs:
             echo "::error::spike 01 PASSED. The recorded verdict has changed: a SharedArrayBuffer reached a sandboxed renderer in another process. Reread spikes/RESULTS.md and ADR 0002, because the original design may be viable on this Electron."
             exit 1
           fi
+          # A crash also exits nonzero, and a broken run must not masquerade as the measured
+          # answer: the report has to exist and carry the verdict.
+          node -e "const r=require('./spikes/01-share-buffer/spike01-result.json'); process.exit(r.verdict==='FAIL'?0:1)"
           echo "the verdict matches the record: FAIL, as spikes/RESULTS.md states"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -83,6 +91,11 @@ jobs:
       - run: npm run build:native
       - run: npm run build
       - run: npm install --no-save electron@^${{ matrix.electron }}
+      - name: configure the SUID sandbox helper the Linux image requires
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: build the spike 08 addon
         shell: bash
         run: cd spikes/08-mmap-accessor && npx node-gyp rebuild
@@ -124,7 +137,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm install --no-save electron@beta
+      # The beta exceeds the workspace's declared peer range on purpose; that is what makes
+      # it a canary.
+      - run: npm install --no-save --legacy-peer-deps electron@beta
+      - name: configure the SUID sandbox helper the Linux image requires
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
       - name: the earliest signal available that the answer changed
         shell: bash
         run: |
