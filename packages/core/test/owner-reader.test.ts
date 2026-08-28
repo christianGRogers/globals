@@ -195,11 +195,23 @@ test("a snapshot from a previous owner generation fails closed", () => {
   reader.detach();
 });
 
-test("a rejected write leaks nothing", () => {
+test("a rejected write leaks nothing beyond the keys it interned", () => {
   const store = owner();
-  const before = store.stats().liveBytes;
-  assert.throws(() => store.commit({ not: "encodable in phase 1" }));
-  assert.equal(store.stats().liveBytes, before);
+  // The symbol is reached part way through encoding, so the encoder has already allocated a
+  // HAMT node, a vector, and several leaves by the time it fails.
+  const reject = (): number => store.commit({ a: 1, b: [1, 2, 3], c: Symbol("no") });
+
+  assert.throws(reject);
+  const afterFirst = store.stats().liveBytes;
+
+  // Interned strings are append only and survive a rollback by design, so the first attempt
+  // leaves the key records behind. Every attempt after it must cost nothing at all.
+  for (let i = 0; i < 50; i += 1) assert.throws(reject);
+  assert.equal(
+    store.stats().liveBytes,
+    afterFirst,
+    "repeated rejected writes must not accumulate",
+  );
 });
 
 test("interned strings are shared across versions", () => {

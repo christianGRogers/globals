@@ -15,7 +15,13 @@ function context(bytes = 1 << 18): EncodeContext {
     flags: 0,
   });
   const allocator = new Allocator(arena);
-  return { arena, allocator, strings: new StringTable(arena, allocator), allocated: [] };
+  return {
+    arena,
+    allocator,
+    strings: new StringTable(arena, allocator),
+    allocated: [],
+    retired: [],
+  };
 }
 
 function roundTrip(value: unknown, ctx = context()): unknown {
@@ -98,13 +104,13 @@ test("equal strings intern to one record", () => {
   assert.equal(ctx.strings.size, 1);
 });
 
-test("values outside the phase 1 ladder raise a typed error naming the reason", () => {
+test("values outside the type ladder raise a typed error naming the reason", () => {
   const ctx = context();
-  assert.throws(() => encodeValue(ctx, {}), UnencodableValueError);
-  assert.throws(() => encodeValue(ctx, [1, 2]), UnencodableValueError);
-  assert.throws(() => encodeValue(ctx, 1n), UnencodableValueError);
   assert.throws(() => encodeValue(ctx, Symbol("s")), UnencodableValueError);
   assert.throws(() => encodeValue(ctx, () => 0), UnencodableValueError);
+  assert.throws(() => encodeValue(ctx, new (class Point {})()), UnencodableValueError);
+  assert.throws(() => encodeValue(ctx, new Map([[{}, 1]])), UnencodableValueError);
+  assert.throws(() => encodeValue(ctx, new WeakMap()), UnencodableValueError);
 });
 
 test("an unknown tag is rejected rather than guessed at", () => {

@@ -32,11 +32,23 @@ snapshot.release();
 reader.detach();
 ```
 
+## Writing
+
+```ts
+await store.update((draft: State) => {
+  draft.users[3].name = "new name";
+});
+```
+
+Only the paths the recipe touched are rebuilt. Setting one key of an object with ten
+thousand keys allocates fewer than twenty blocks rather than copying the record. See
+[docs/object-layer.md](../../docs/object-layer.md).
+
 ## Type ladder
 
-This package encodes the scalar rung: `number`, `string`, `boolean`, `null`, and
-`undefined`. Objects, arrays, and the rest of the ladder arrive with the object layer.
-Anything unencodable raises `UnencodableValueError` rather than being silently coerced.
+Plain objects, arrays, `Map`, `Set`, `Date`, `RegExp`, `BigInt`, typed arrays, and the
+scalars. Anything else raises `UnencodableValueError` rather than being silently coerced,
+and reaches the asynchronous tier through `ExternalTier` if it needs to be shared at all.
 
 ## Errors
 

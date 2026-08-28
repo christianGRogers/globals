@@ -13,7 +13,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { ArenaOwner } from "../../src/owner.js";
-import { expectedValueFor } from "./invariant.js";
+import { WHOLESALE_EVERY, expectedState, type SoakState } from "./invariant.js";
 import type { ReaderReport } from "./reader-worker.js";
 
 interface Sample {
@@ -51,6 +51,8 @@ const owner = ArenaOwner.create({
   maxReaders: Math.max(readerCount + 2, 8),
   retainedVersions,
 });
+// Seed the shape the recipe then updates in place.
+owner.commit(expectedState(owner.versionId + 1));
 
 const workerUrl = new URL("./reader-worker.js", import.meta.url);
 const reports = new Map<number, ReaderReport>();
@@ -95,8 +97,26 @@ let nextProgressAt = startedAt + 10_000;
 function writeBatch(): void {
   // Commit in batches, then yield, so the event loop can drain worker messages. A writer
   // that never yields starves its own reporting and makes the run unobservable.
-  for (let i = 0; i < 2000; i += 1) {
-    owner.commit(expectedValueFor(owner.versionId + 1));
+  for (let i = 0; i < 200; i += 1) {
+    const next = owner.versionId + 1;
+    const state = expectedState(next);
+
+    if (next % WHOLESALE_EVERY === 0) {
+      // Periodically replace the root outright, which retires a whole structure at once and
+      // exercises a different reclamation path from the targeted updates.
+      owner.commit(state);
+      continue;
+    }
+
+    owner.update((draft: SoakState) => {
+      draft.version = state.version;
+      draft.ratio = state.ratio;
+      draft.tag = state.tag;
+      draft.list[0] = state.list[0] as number;
+      draft.nested.x = state.nested.x;
+      draft.nested.flag = state.nested.flag;
+      draft.nested.label = state.nested.label;
+    });
   }
   owner.beat();
 

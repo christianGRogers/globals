@@ -64,6 +64,46 @@ Reading of this result:
 - Stranded bytes stayed at zero, so the free lists are absorbing all the churn and there is
   no fragmentation signal yet.
 
+## Phase 2 exit run, with the object layer
+
+Same machine and date. The workload now commits a structured state rather than a scalar, so
+the run covers the HAMT, the vector, interning, and both reclamation paths. Most commits are
+targeted updates through a draft, and every 512th replaces the root outright so that
+retiring a whole structure at once is exercised too.
+
+```
+soak: 8 readers, 300s, 64 retained versions
+
+  duration            300.3s
+  readers             8
+  commits             836002 (2784/s)
+  reads               16086350 (53568/s)
+  distinct versions   6543791
+  inconsistent reads  0
+  version regressions 0
+  corruptions         0
+  stale snapshots     0
+  interned strings    136
+  live bytes          4944
+  stranded bytes      0
+  bump growth, 2nd half 0 bytes
+
+gate: PASS, zero inconsistent reads and no unbounded growth
+```
+
+Reading of this result:
+
+- Every read decodes the whole structure through `toJSON` and checks seven fields against
+  what the version id says they must be. A partial decode could miss a torn subtree that the
+  lazy path never touched, so the soak deliberately takes the expensive path.
+- Live bytes settled at 4944 and did not move. Structural sharing plus path copy retirement
+  is returning exactly what it takes, across 836 thousand commits.
+- Interned strings settled at 136 and stopped growing, which is the bounded pool behaving as
+  the invariant intends. An unbounded string workload would show here as a climbing number,
+  which is the signal that a workload belongs in the asynchronous tier.
+- Zero stale snapshots this time. Reads are slower now that each one walks a whole structure,
+  so readers acquire less often and never fall past the retention cap.
+
 ## The bug this run exists to prove is gone
 
 An earlier 12 second run reported 2 inconsistent reads in 4.17 million. Forced reclamation

@@ -16,6 +16,14 @@ All notable changes to this project are recorded here. The format follows
   reclamation with bounded retention.
 - The multi process soak harness, which gates every change to the arena.
 - The kept read latency benchmark, and `docs/benchmarks.md`.
+- The object layer: a HAMT for objects, maps, and sets, a chunked persistent vector for
+  arrays, and the extended type ladder through `Date`, `RegExp`, `BigInt`, and typed
+  arrays.
+- A draft based write API, `owner.update`, that rebuilds only the paths a recipe touched.
+- A lazy read view that decodes on property access and revalidates the version each time,
+  plus `snapshot.get(path)` and `snapshot.toJSON()`.
+- `OwnerStore` and `ReaderStore`, which separate reading from writing in the type system.
+- `ExternalTier`, the asynchronous escape hatch for values the ladder cannot encode.
 
 ### Fixed
 
