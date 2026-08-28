@@ -77,8 +77,8 @@ the decision between them is a product decision rather than a technical one:
 4. **Step outside the web platform.** Spike 08 measured the route the web APIs cannot
    offer: a file-backed region mapped into every process by an N-API addon and read through
    native accessor calls, which keeps the V8 memory cage out of the picture. It delivers the
-   original contract — synchronous cross-process reads, zero torn reads under a full rate
-   writer, accessor reads at 14 ns against a 35 µs IPC round trip — at the price the
+   original contract, synchronous cross-process reads with zero torn reads under a full rate
+   writer and accessor reads at 14 ns against a 35 µs IPC round trip, at the price the
    original gate refused to pay: `sandbox: false` on every window that maps the arena.
    That is not a pass of the gate. It is a different product with the same API and a heavier
    trust sentence, and it is measured rather than hypothesised.
@@ -162,7 +162,7 @@ that conclusion was wrong. Rerun with the worker instrumented (macOS arm64, Elec
 and 44.0.0, 2026-08-28), the worker connects on every transport, including the custom
 scheme. It had been dying at top level on `new SharedArrayBuffer`, because a shared worker's
 global scope is not cross origin isolated even when its script is served with
-`Cross-Origin-Embedder-Policy: require-corp` — and a runtime error inside a SharedWorker
+`Cross-Origin-Embedder-Policy: require-corp`, and a runtime error inside a SharedWorker
 surfaces nothing in the pages that created it. The original result was silence mistaken for
 absence.
 
@@ -188,8 +188,8 @@ cluster of its own, never the one the windows share. The same rule accounts for 
 mechanism this phase measured: same origin windows related by `window.open` share a cluster,
 so the buffer crosses there (spike 05), and Chromium keeps a cluster in one process, which
 is why those windows colocate; independent windows are separate clusters, which is why the
-port and the broadcast drop the buffer. The premise — shared memory read synchronously
-across renderer processes — is not a missing Electron feature or a Chromium bug. The
+port and the broadcast drop the buffer. The premise, shared memory read synchronously
+across renderer processes, is not a missing Electron feature or a Chromium bug. The
 platform defines shared memory as intra cluster, and maps cluster boundaries onto exactly
 the process boundaries the premise needed to cross.
 

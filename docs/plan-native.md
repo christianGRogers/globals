@@ -68,7 +68,7 @@ Mostly deletion, which ADR 0003 explains. What remains:
 - Persistence unchanged, minus the owner window lifecycle it no longer needs.
 
 **Exit.** The e2e application passes its fourteen checks against windows in separate OS
-processes, asserted by pid — the check spike 05 taught this project to never skip.
+processes, asserted by pid, which is the check spike 05 taught this project to never skip.
 
 ## N3 Chaos, soak, and the matrix, 1 to 2 weeks
 
@@ -107,7 +107,7 @@ with no C toolchain, with documentation a stranger could adopt from.
 - [ ] Spike 08 green on every supported Electron major, on all three platforms
 - [ ] The chaos harness green on all three platforms
 - [ ] A twenty four hour, eight reader soak, recorded
-- [ ] The trust note reviewed by someone outside the project who agrees it is honest —
+- [ ] The trust note reviewed by someone outside the project who agrees it is honest,
       heavier now than when the plan first asked for it, because the sentence got heavier
 - [ ] A non trivial application built by someone who did not write the library, from the
       published docs alone
