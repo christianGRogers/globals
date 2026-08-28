@@ -41,7 +41,7 @@ jobs:
       - name: run the sharing spike under xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: spike01-${{ matrix.os }}-electron${{ matrix.electron }}
@@ -78,7 +78,7 @@ jobs:
           node scripts/run-electron.mjs packages/electron/test/chaos-app/main.mjs
           --report packages/electron/test/chaos-app/chaos-result.json
           --seconds 120
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: chaos-${{ matrix.os }}-electron${{ matrix.electron }}
@@ -99,7 +99,7 @@ jobs:
       - run: npm install --no-save electron@beta
       - name: canary, failure here is a warning not a break
         run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: spike01-canary
