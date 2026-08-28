@@ -57,6 +57,9 @@ function serve() {
 
 const loadFailures = [];
 const rendererLog = [];
+// The claim the project rests on is cross process sharing. If every window is in one renderer
+// process, a buffer that transfers proves nothing a plain object in one heap would not.
+const processIds = {};
 
 function createWindow({ page, show, title }) {
   const window = new BrowserWindow({
@@ -96,6 +99,9 @@ function createWindow({ page, show, title }) {
   });
 
   void window.loadURL(`${SCHEME}://spike/${page}`);
+  loaded.then(() => {
+    processIds[title] = window.webContents.getOSProcessId();
+  });
   return { window, loaded };
 }
 
@@ -129,6 +135,7 @@ async function writeReport(checks, verdict) {
           arch: process.arch,
           at: new Date().toISOString(),
           rendererLog,
+          processIds,
           reports,
           checks,
           verdict,
@@ -153,6 +160,14 @@ function finish() {
     { name: "readers observed the owner write", pass: readers.every((r) => r.sawOwnerValue) },
     { name: "owner observed a reader write", pass: owner?.sawReaderValue === true },
     { name: "grow() was observed by readers", pass: readers.every((r) => r.observedGrowth) },
+    {
+      name: "the owner and the readers are in different OS processes",
+      pass:
+        typeof processIds.owner === "number" &&
+        typeof processIds["ui-a"] === "number" &&
+        processIds.owner !== processIds["ui-a"],
+      detail: JSON.stringify(processIds),
+    },
   ];
 
   console.log("");

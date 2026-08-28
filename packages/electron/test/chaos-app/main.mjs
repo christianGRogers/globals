@@ -15,18 +15,19 @@
  * Like spike 01, the verdict goes to a JSON file: an Electron main process on Windows is a
  * GUI subsystem binary and its console output never reaches the parent pipe.
  */
-import { app, BrowserWindow } from "electron";
+import { app } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
-import { GlobalsHost, prepare, preloadPath } from "../../dist/src/index.js";
+import { GlobalsHost, prepare } from "../../dist/src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-// packages/electron, because the pages import ../../dist/src directly. Serving the chaos-app
-// directory would 404 every one of those and the windows would load nothing.
-const packageRoot = join(here, "..", "..");
+// The repository root, because the pages import @globals/core through an import map and a
+// page can only reach what the served root contains.
+const repositoryRoot = join(here, "..", "..", "..", "..");
+const PAGES = "packages/electron/test/chaos-app";
 // Filtering argv down to things starting with two dashes looks like a reasonable way to
 // ignore the switches Electron injects. It is not: it drops the values as well, so
 // "--report path" parses as report being "--seconds". Tolerating unknown tokens is the
@@ -82,18 +83,14 @@ async function writeReport(verdict, failures) {
   );
 }
 
-function openWindow(id) {
-  const window = new BrowserWindow({
-    show: false,
-    webPreferences: {
-      preload: preloadPath(),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+async function openWindow(id) {
+  // The owner opens it, because a SharedArrayBuffer only crosses between an opener and the
+  // window it opened. See docs/adr/0002-window-open-handshake.md.
+  const window = await host.openWindow({
+    page: `${PAGES}/ui.html?id=${id}`,
+    name: `chaos-${id}`,
+    browserWindow: { show: false, width: 700, height: 500 },
   });
-  host.attach(window, { name: `chaos-${id}` });
-  void window.loadURL(host.url(`test/chaos-app/ui.html?id=${id}`));
   events.opened += 1;
   return window;
 }
@@ -108,12 +105,12 @@ function openWindow(id) {
 async function main() {
 
   host = await GlobalsHost.start({
-    root: packageRoot,
-    ownerPage: "test/chaos-app/owner.html",
+    root: repositoryRoot,
+    ownerPage: `${PAGES}/owner.html`,
   });
 
   const windows = new Map();
-  for (let id = 0; id < windowCount; id += 1) windows.set(id, openWindow(id));
+  for (let id = 0; id < windowCount; id += 1) windows.set(id, await openWindow(id));
 
   const finishAt = Date.now() + durationMs;
 
@@ -140,7 +137,9 @@ async function main() {
     window?.destroy();
     windows.delete(id);
     events.closed += 1;
-    setTimeout(() => windows.set(id, openWindow(id)), 400);
+    setTimeout(() => {
+      void openWindow(id).then((replacement) => windows.set(id, replacement)).catch(() => undefined);
+    }, 400);
   }, 500);
 
   setTimeout(async () => {

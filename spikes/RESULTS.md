@@ -15,25 +15,65 @@ Recorded runs, with the machine described, so the numbers can be reproduced or d
 
 ## The gate, answered
 
-**A SharedArrayBuffer can be shared between two sandboxed, context isolated, cross origin
-isolated renderers. The project is viable.**
+**A SharedArrayBuffer does not cross a renderer process boundary in Electron 33 by any
+mechanism measured here.** The gate fails.
 
-What does not work is the handshake the design assumed. The buffer will not survive a
-MessageChannelMain port, which is Electron's serializer rather than Chromium's. It survives a
-post to a window opened with `window.open`, which is Chromium's own path.
+The result took two rounds to get right, and the first round was wrong in the optimistic
+direction, so both are recorded.
 
-| Mechanism | Result | Spike |
-| --- | --- | --- |
-| `MessageChannelMain` port, main brokered | **Fails.** The receiver gets `messageerror` and the payload is dropped | 01 |
-| `window.open` plus `postMessage` | **Works**, in both directions | 05 |
-| `BroadcastChannel` | Fails. Silently dropped, not even a `messageerror` | 06 |
-| `SharedWorker` owning the buffer | Never connected over a custom protocol, and surfaced no error | 07 |
+| Mechanism | Buffer arrives | Windows in separate OS processes | Useful |
+| --- | --- | --- | --- |
+| `MessageChannelMain` port, main brokered | No, `messageerror` | **Yes**, three distinct pids | No |
+| `window.open` plus `postMessage` | **Yes**, both directions | **No**, one pid for every window | No |
+| `BroadcastChannel` | No, silently dropped | Yes | No |
+| `SharedWorker` | Never connected over a custom protocol | n/a | No |
 
-The consequence for the design is in [ADR 0002](../docs/adr/0002-window-open-handshake.md).
-The topology is unchanged: a hidden owner renderer still owns the arena and the Node main
-process still stays off the read path. What changes is that the owner must open the windows
-that need the shared tier, because only an opener and its opened window can post a buffer to
-each other.
+The two rows that matter are the first two, and they are exclusive. The mechanism that keeps
+windows in separate processes will not carry the buffer. The mechanism that carries the buffer
+puts every window in one process, and it does so for a reason that cannot be configured away:
+an opener and the window it opened are same origin related browsing contexts, so they must
+share a process in order to script each other synchronously. That is the same property that
+makes the direct `postMessage` work.
+
+Measured process ids, from the recorded runs:
+
+```
+spike 01, MessageChannelMain:  owner 63620, ui-a 24920, ui-b 61500   buffer: messageerror
+end to end, window.open:       owner 28480, shared-a 28480, shared-b 28480, plugin 28480
+```
+
+Sharing memory between contexts inside one renderer process is not the problem this library
+exists to solve. The premise was one region of real shared memory read synchronously **across
+Electron processes**, and that is what is not available.
+
+### The first answer, and why it was wrong
+
+An earlier version of this document said the gate was cleared, on the strength of spike 05
+showing a buffer transferring between two sandboxed, cross origin isolated windows in both
+directions. Every one of those observations was true. The spike simply did not check whether
+the two windows were in different processes, and they were not.
+
+The check that caught it was added only because the chaos harness crashed a renderer and took
+the owner down with it, which does not happen unless they share a process. Without that
+accident the wrong conclusion would have survived, which is an argument for measuring the
+thing you are actually claiming rather than a proxy for it.
+
+Both spikes now report process ids, and the process separation check is part of the gate.
+
+### What this means for the project
+
+The off ramps in [docs/plan.md](../docs/plan.md) were written for exactly this outcome and
+the decision between them is a product decision rather than a technical one:
+
+1. **Ship the asynchronous library.** Patch based replication with a better API and real
+   types. Phases 1 and 2 are not wasted: the arena, the object layer, and the persistent
+   structures are runtime agnostic and none of them depend on the handshake.
+2. **Reposition as single process.** The `window.open` topology genuinely works and gives
+   synchronous shared reads to every window, at the cost of putting them all in one renderer
+   process. A crash in any window takes the rest with it, and process isolation between
+   windows is gone. That is a real product for applications that render only their own UI and
+   would accept the trade, but it is a much narrower claim than the one the plan opens with.
+3. **Stop.** The gate is the gate.
 
 ## Status of each spike
 
@@ -177,10 +217,10 @@ Reading of this result:
 
 | Gate condition | Verdict |
 | --- | --- |
-| A buffer reaches a sandboxed renderer | **Cleared**, through window.open. Not through MessageChannelMain. |
+| A buffer reaches a sandboxed renderer in another process | **Failed.** No mechanism measured does both. |
 | Reads at least 50 times faster than an IPC round trip | Cleared, measured 79 times against the real decoder |
-| Atomics hold across contexts | Cleared for threads. Cross renderer atomics follow from the buffer being genuinely shared, which spike 05 demonstrates in both directions. |
+| Atomics hold across contexts | Cleared for threads, untested across renderer processes because no buffer reaches one |
 
-Phase 1 was written at risk against an unproven gate. The risk paid off: the core is runtime
-agnostic and none of it depended on the handshake. What has to change is the Electron
-integration, which is one package.
+The plan said to stop the project if a buffer cannot reach a sandboxed renderer without
+disabling the sandbox. The sandbox was never the obstacle: the process boundary is. Which off
+ramp to take is a product decision, and the three are set out above.

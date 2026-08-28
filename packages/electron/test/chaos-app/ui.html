@@ -3,6 +3,13 @@
 <title>chaos window</title>
 <body>
 <pre id="log"></pre>
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
 import { connect } from "../../dist/src/renderer.js";
 
@@ -13,7 +20,7 @@ let reads = 0;
 let inconsistent = 0;
 let stale = 0;
 
-const connection = await connect();
+const connection = await connect({ name: `chaos-${id}` });
 log(`bound on the ${connection.tier} tier`);
 
 if (connection.tier === "shared") {

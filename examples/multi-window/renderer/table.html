@@ -10,10 +10,17 @@
 <div id="viewport" style="height: calc(100vh - 46px); overflow: auto">
   <div id="spacer"><table id="grid" style="border-collapse: collapse; width: 100%"></table></div>
 </div>
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
 import { connect } from "../../../packages/electron/dist/src/renderer.js";
 
-const store = await connect();
+const store = await connect({ name: "table" });
 if (store.tier !== "shared") throw new Error("this window expected the shared tier");
 
 const ROW_HEIGHT = 22;

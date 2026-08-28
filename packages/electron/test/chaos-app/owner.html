@@ -3,8 +3,15 @@
 <title>chaos owner</title>
 <body>
 <pre id="log"></pre>
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
-import { startOwner } from "../../dist/src/index.js";
+import { startOwner } from "../../dist/src/owner.js";
 
 const log = (line) => { document.getElementById("log").textContent += line + "\n"; };
 

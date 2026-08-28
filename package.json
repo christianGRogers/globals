@@ -25,7 +25,9 @@
     "verify": "npm run build && node scripts/run-tests.mjs && node scripts/check-docs.mjs",
     "gate": "node spikes/run-spike.mjs 01",
     "gate:chaos": "npm run build && node scripts/run-electron.mjs packages/electron/test/chaos-app/main.mjs --report packages/electron/test/chaos-app/chaos-result.json --seconds 60",
-    "gate:example": "npm run build && node scripts/run-electron.mjs examples/multi-window/main.mjs"
+    "gate:example": "npm run build && node scripts/run-electron.mjs examples/multi-window/main.mjs",
+    "gate:e2e": "npm run build && node scripts/run-electron.mjs packages/electron/test/e2e-app/main.mjs --report packages/electron/test/e2e-app/e2e-result.json",
+    "gate:docker": "docker build -f docker/gate.Dockerfile -t globals-gate . && docker run --rm --init --ipc=host globals-gate"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

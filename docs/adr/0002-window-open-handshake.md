@@ -1,77 +1,59 @@
-# ADR 0002: The owner opens the windows that share its buffer
+# ADR 0002: The window.open handshake, and why it does not rescue the design
 
-- Status: accepted
+- Status: rejected as a solution, kept as the record of what was measured
 - Date: 2026-08-28
-- Supersedes: the handshake described in [ADR 0001](0001-hidden-owner-window.md). The
-  topology in ADR 0001 stands.
+- Relates to: [ADR 0001](0001-hidden-owner-window.md)
 
 ## Context
 
-ADR 0001 established that the arena owner is a hidden renderer rather than the Node main
-process, because Chromium shares `SharedArrayBuffer` backing stores between renderers and the
-V8 cage rules out the native addon route.
-
-It also assumed a handshake: the main process creates a `MessageChannelMain`, hands one port
+ADR 0001 assumed a handshake: the main process creates a `MessageChannelMain`, hands one port
 to the owner and one to each window, and the buffer travels renderer to renderer over that
-port. That is the documented Electron pattern for connecting two renderers directly.
+port.
 
-Spike 01 measured it, and it does not work. With both ends cross origin isolated and
-`SharedArrayBuffer` available in both, the owner's `postMessage` does not throw and the
-receiver gets `messageerror`. The payload is dropped. A plain buffer and a growable buffer
-fail identically, so it is not about growable buffers being newer.
+Spike 01 measured it. With both ends cross origin isolated, `SharedArrayBuffer` available in
+both, and the sender's `postMessage` not throwing, the receiver gets `messageerror` and the
+payload is dropped. Plain and growable buffers fail identically. The three windows were in
+three different OS processes, so this is a genuine cross process failure.
 
-The architecture document already suspected this. It says `MessagePortMain` has known gaps
-around transferables, and then the design leaned on the mechanism anyway. Phase 0 exists to
-catch exactly that.
+Spike 05 then measured `window.open` plus `postMessage`, and the buffer arrived, in both
+directions, with the sandbox and context isolation intact. That looked like the answer.
 
-Three alternatives were measured:
+It was not. Every window in that topology is in the same OS process. An opener and the window
+it opened are same origin related browsing contexts, so Chromium must keep them in one process
+for `window.opener` to work at all. The property that makes the direct post succeed is the
+same property that removes the process boundary.
 
-| Mechanism | Result |
-| --- | --- |
-| `window.open` plus `postMessage` | Works, both directions, sandbox and context isolation intact |
-| `BroadcastChannel` | Silently dropped, not even a `messageerror` |
-| `SharedWorker` owning the buffer | Never connected over a custom protocol, no error surfaced |
+Measured, from the recorded runs:
+
+```
+MessageChannelMain:  owner 63620, ui-a 24920, ui-b 61500   buffer: messageerror
+window.open:         owner 28480, and every window 28480   buffer: arrives
+```
 
 ## Decision
 
-The owner window opens every window that needs the shared tier, using `window.open`. The
-buffer is posted directly from the owner to the opened window over the window messaging
-channel Chromium provides between an opener and its opened window.
+`window.open` is not adopted as the handshake, because it does not deliver what the project
+is for. Sharing memory between contexts inside one renderer process is not the problem; the
+premise was shared memory across Electron processes.
 
-The main process keeps control of what those windows look like through
-`setWindowOpenHandler` and `overrideBrowserWindowOptions`, so window size, position, and web
-preferences are still the application's decision and still enforced in the main process.
+No handshake is adopted. The gate has failed and the choice is between the off ramps in
+[plan.md](../plan.md), which is a product decision rather than an engineering one.
 
 ## Consequences
 
-Positive:
+- The Electron integration in this repository implements the `window.open` handshake, because
+  that is how the finding was arrived at and it is the only thing that runs end to end. It
+  should be understood as a demonstration of the single process topology, not as a shipping
+  design for the original claim.
+- The core is unaffected. It is runtime agnostic, it never depended on the handshake, and it
+  survives into any of the off ramps.
+- If a future Electron makes `MessageChannelMain` carry a `SharedArrayBuffer`, the original
+  design becomes viable again with no change to the core. Spike 01 is the test to rerun, and
+  it now checks process separation, so it cannot pass for the wrong reason.
 
-- The mechanism is Chromium's own, and it is the same path a browser uses between an opener
-  and its opened window. It is not an Electron specific feature with gaps.
-- The topology from ADR 0001 is unchanged. The owner is still a hidden renderer, the main
-  process is still off the read path, and the core is unaffected.
-- Sandboxing and context isolation are unaffected. The opened window inherits the same web
-  preferences.
+## What would have caught this sooner
 
-Negative:
-
-- **A window that needs the shared tier must be opened by the owner.** An application that
-  creates windows with `new BrowserWindow` in the main process and expects them to join the
-  shared tier will not work. This is the largest constraint the library imposes and it has to
-  be first in the integration documentation.
-- The main process no longer decides when a window exists, only what it looks like. An
-  application that wants to open a window asks the owner to do it.
-- A window opened with `noopener` cannot join the shared tier, because the relationship is
-  the mechanism.
-- Any window that is not opened by the owner falls back to the asynchronous tier. That is not
-  a new concept, it is the per window opt out from the trust model arriving by a different
-  route.
-
-## Alternatives considered
-
-| Alternative | Rejected because |
-| --- | --- |
-| `MessageChannelMain`, the original design | Measured, does not transfer a buffer. Spike 01. |
-| `BroadcastChannel` | Measured, the buffer is silently dropped. Spike 06. |
-| A `SharedWorker` as the owner | Measured, never connected over a custom protocol. Attractive if it worked, since it needs no window relationship and would save a renderer process. Worth revisiting if Electron's support changes. Spike 07. |
-| Passing the buffer through the main process | The reason ADR 0001 exists. Node cannot usefully hold it. |
+The gate condition was written as "a buffer reaches a sandboxed renderer". It should have been
+"a buffer reaches a sandboxed renderer **in a different OS process**", which is what the plan
+meant everywhere else and what the value proposition depends on. A gate that does not name the
+property it is protecting can be passed by something that does not have it.
