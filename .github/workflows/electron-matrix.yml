@@ -159,7 +159,14 @@ jobs:
           fi
       - name: the earliest signal available that the answer changed
         shell: bash
+        # The helper is configured here rather than in its own step, because the beta's
+        # binary can land after the install step returns and a fix that ran too early
+        # fixed nothing.
         run: |
+          if [ -e node_modules/electron/dist/chrome-sandbox ]; then
+            sudo chown root:root node_modules/electron/dist/chrome-sandbox
+            sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          fi
           if xvfb-run --auto-servernum node spikes/run-spike.mjs 01; then
             echo "::warning::spike 01 PASSED on the Electron beta. The next major may change the recorded answer."
             exit 1
@@ -168,6 +175,10 @@ jobs:
       - name: the native transport against the beta, failure here is the real warning
         shell: bash
         run: |
+          if [ -e node_modules/electron/dist/chrome-sandbox ]; then
+            sudo chown root:root node_modules/electron/dist/chrome-sandbox
+            sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          fi
           npm run build:native
           npm run build
           cd spikes/08-mmap-accessor && npx node-gyp rebuild && cd ../..
