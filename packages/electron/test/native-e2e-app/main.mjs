@@ -8,13 +8,13 @@
  *
  *   npm run gate:native
  */
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, session } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { writeFile, unlink } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
-import { startNativeOwner } from "../../dist/src/native/owner.js";
+import { startNativeOwner, asyncPreloadPath } from "../../dist/src/native/owner.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +81,7 @@ async function main() {
     const reported = new Promise((resolve) => {
       ipcMain.on("e2e:report", (_event, observation) => {
         observations[observation.window] = observation;
-        if (Object.keys(observations).length === 2) resolve(undefined);
+        if (Object.keys(observations).length === 3) resolve(undefined);
       });
     });
 
@@ -110,6 +110,28 @@ async function main() {
       processIds[name] = window.webContents.getOSProcessId();
     }
 
+    // The third window keeps its sandbox and gets the asynchronous tier: the shipped
+    // preload-async.cjs, plus the test's report channel, through session preloads because
+    // sandboxed preloads cannot require each other.
+    const asyncSession = session.fromPartition("native-e2e-async");
+    asyncSession.setPreloads([asyncPreloadPath(), join(here, "preload-report.cjs")]);
+    const pluginWindow = new BrowserWindow({
+      show: false,
+      width: 700,
+      height: 500,
+      webPreferences: {
+        session: asyncSession,
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    pluginWindow.webContents.on("console-message", (_e, _l, message, line, source) => {
+      rendererLog.push(`[plugin-async] ${message} (${source}:${line})`);
+    });
+    await pluginWindow.loadFile(join(here, "page-async.html"));
+    processIds["plugin-async"] = pluginWindow.webContents.getOSProcessId();
+
     await reported;
 
     // The owner reads its own store synchronously: main is the owner in this topology.
@@ -124,10 +146,11 @@ async function main() {
 
     const a = observations["shared-a"];
     const b = observations["shared-b"];
+    const plugin = observations["plugin-async"];
     const both = (key) => a?.[key] === true && b?.[key] === true;
 
     const checks = [
-      { name: "every window reported", pass: Boolean(a && b) },
+      { name: "every window reported", pass: Boolean(a && b && plugin) },
       { name: "arena windows run without the sandbox, with context isolation on", pass: both("isolationAsStated") },
       { name: "the region held a commit before the first read", pass: both("regionReady") },
       { name: "a window read shared state synchronously", pass: both("readSynchronously") },
@@ -140,6 +163,13 @@ async function main() {
       { name: "a snapshot pinned across a commit keeps reading its commit", pass: both("snapshotPinned") },
       { name: "a commit notification fired subscribers", pass: both("subscribeFired") },
       { name: "the owner process reads its own store synchronously", pass: mainSawBoth },
+      {
+        name: "the sandboxed window is on the async tier, with no synchronous get",
+        pass: plugin?.tier === "async" && plugin?.hasSynchronousGet === false,
+      },
+      { name: "the async tier reads the whole state and one path", pass: plugin?.asyncReadWorks === true },
+      { name: "the async tier dispatches and observes its write", pass: plugin?.dispatchWorks === true },
+      { name: "the async tier hears commit notifications", pass: plugin?.subscribeFired === true },
       {
         // The claim the topology exists for. If the windows shared a process with the owner
         // or each other, the result would prove nothing a plain object in one heap would not.
