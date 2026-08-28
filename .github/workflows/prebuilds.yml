@@ -1,0 +1,59 @@
+name: prebuilds
+
+# Builds the @globals/shm addon for every supported platform and architecture, smoke tests
+# each binary on the machine that built it, and uploads the results as artifacts. Node-API
+# binaries are ABI stable, so one binary per platform-arch pair serves every supported Node
+# and Electron. The release pipeline collects these artifacts into the published package;
+# until then this workflow is the proof half of the N1 exit gate: the prebuild loads and
+# works on every cell.
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - "packages/shm/native/**"
+      - ".github/workflows/prebuilds.yml"
+
+permissions:
+  contents: read
+
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+jobs:
+  prebuild:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-13
+          - macos-latest
+          - windows-latest
+          - windows-11-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:native
+      - run: npm run build
+      - name: smoke test the binary this machine built
+        run: node packages/shm/scripts/smoke.mjs
+      - name: stage the prebuild under its platform-arch name
+        shell: bash
+        run: |
+          dest="packages/shm/native/prebuilds/$(node -p 'process.platform + "-" + process.arch')"
+          mkdir -p "$dest"
+          cp packages/shm/native/build/Release/globals_shm.node "$dest/"
+          echo "built $dest"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prebuild-${{ matrix.os }}
+          path: packages/shm/native/prebuilds/

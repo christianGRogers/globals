@@ -7,29 +7,77 @@ const name = new URLSearchParams(location.search).get("name") ?? "page";
 const log = (line) => console.log(`${name}: ${line}`);
 log(`crossOriginIsolated=${self.crossOriginIsolated}, SharedWorker=${typeof SharedWorker}`);
 
+// Slot 0 is the worker's. Slot 1 belongs to page-a, slot 2 to page-b. Each page writes its
+// own slot and polls the other through its own mapping of the buffer, because the claim
+// under test is memory shared across processes, not messages relayed by the worker.
+const mySlot = name === "page-a" ? 1 : 2;
+const peerSlot = name === "page-a" ? 2 : 1;
+const myValue = name === "page-a" ? 0xFACE : 0xBEEF;
+const peerValue = name === "page-a" ? 0xBEEF : 0xFACE;
+
+const facts = { window: name, crossOriginIsolated: self.crossOriginIsolated === true };
+let reported = false;
+const report = (data) => {
+  if (reported) return;
+  reported = true;
+  window.spike.report({ ...facts, ...data });
+};
+// If the flow stalls anywhere, report what was learned rather than nothing. Silence was
+// this spike's entire first result, and it explained nothing.
+setTimeout(() => report({ stalled: true }), 20_000);
+
 if (typeof SharedWorker === "undefined") {
-  window.spike.report({ window: name, sharedWorkerAvailable: false });
+  report({ sharedWorkerAvailable: false });
 } else {
+  facts.sharedWorkerAvailable = true;
   let worker;
   try {
     worker = new SharedWorker("worker.js", { name: "globals-owner" });
   } catch (error) {
     log("CONSTRUCTING THE WORKER THREW: " + error.name + ": " + error.message);
-    window.spike.report({ window: name, sharedWorkerAvailable: true, constructThrew: error.message });
+    report({ constructThrew: error.message });
     throw error;
   }
   worker.addEventListener("error", (event) => {
     log("WORKER ERROR: " + (event.message || "no message") + " at " + (event.filename || "?"));
-    window.spike.report({ window: name, sharedWorkerAvailable: true, workerError: String(event.message || "unknown") });
+    report({ workerError: String(event.message || "unknown") });
   });
   worker.port.addEventListener("messageerror", () => {
     log("MESSAGEERROR: the payload could not be deserialised here");
-    window.spike.report({ window: name, received: false, deserialised: false });
+    report({ received: false, deserialised: false });
   });
   worker.port.addEventListener("message", (event) => {
+    if (event.data.kind === "hello") {
+      const { workerCrossOriginIsolated, sabConstructor, creationError, connections } = event.data;
+      log(`worker hello: crossOriginIsolated=${workerCrossOriginIsolated}, SharedArrayBuffer=${sabConstructor}, creationError=${creationError ?? "none"}, connections=${connections}`);
+      Object.assign(facts, { workerCrossOriginIsolated, workerSabConstructor: sabConstructor, workerCreationError: creationError ?? null });
+      if (creationError && name === "page-a") {
+        // The worker could not make the buffer, so this page makes one and sends it up.
+        // That tests the window to worker direction of the same transfer.
+        try {
+          const seed = new SharedArrayBuffer(1024);
+          log("seeding the worker with a page-created buffer");
+          worker.port.postMessage({ kind: "seed", sab: seed });
+        } catch (error) {
+          log(`creating or posting the seed threw: ${error.name}: ${error.message}`);
+          report({ seedThrew: `${error.name}: ${error.message}` });
+        }
+      }
+      return;
+    }
     if (event.data.kind === "post-threw") {
       log(`WORKER POST THREW: ${event.data.message}`);
-      window.spike.report({ window: name, postThrew: event.data.message });
+      report({ postThrew: event.data.message });
+      return;
+    }
+    if (event.data.kind === "seed-failed") {
+      log(`WORKER COULD NOT ADOPT THE SEED: ${event.data.message}`);
+      report({ seedFailed: event.data.message });
+      return;
+    }
+    if (event.data.kind === "worker-messageerror") {
+      log("THE WORKER GOT MESSAGEERROR: our post to it was dropped");
+      report({ sabToWorkerDropped: true });
       return;
     }
     if (event.data.kind === "buffer") {
@@ -37,20 +85,35 @@ if (typeof SharedWorker === "undefined") {
       const i32 = new Int32Array(sab);
       const sawOwnerValue = Atomics.load(i32, 0) === 0xC0FFEE;
       log(`RECEIVED ${sab.byteLength} bytes, owner value seen: ${sawOwnerValue}, connections=${event.data.connections}`);
-      Atomics.store(i32, 1, 0xFACE);
-      worker.port.postMessage("read-back");
-      window.__sawOwnerValue = sawOwnerValue;
+      facts.received = true;
+      facts.sawOwnerValue = sawOwnerValue;
+      Atomics.store(i32, mySlot, myValue);
+
+      // Poll the peer's slot through this page's own view. Seeing the value here is the
+      // whole point: it proves the two mappings are one memory, wherever the pages live.
+      const startedAt = Date.now();
+      const poll = setInterval(() => {
+        if (Atomics.load(i32, peerSlot) === peerValue) {
+          clearInterval(poll);
+          log(`saw the peer's write directly, 0x${peerValue.toString(16)}`);
+          facts.directPeerWrite = true;
+          worker.port.postMessage("read-back");
+        } else if (Date.now() - startedAt > 15_000) {
+          clearInterval(poll);
+          log("never saw the peer's write");
+          facts.directPeerWrite = false;
+          worker.port.postMessage("read-back");
+        }
+      }, 10);
       return;
     }
     if (event.data.kind === "read-back") {
       log(`the worker read back 0x${event.data.value.toString(16)}`);
-      window.spike.report({
-        window: name,
-        crossOriginIsolated: self.crossOriginIsolated === true,
+      report({
         sandboxed: window.spike.sandboxed,
-        sharedWorkerAvailable: true,
         received: true,
-        sawOwnerValue: window.__sawOwnerValue === true,
+        sawOwnerValue: facts.sawOwnerValue === true,
+        directPeerWrite: facts.directPeerWrite === true,
         workerSawOurWrite: event.data.value === 0xFACE,
       });
     }

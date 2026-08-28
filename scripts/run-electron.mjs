@@ -93,7 +93,9 @@ export function printReport(entry, report, reportPath) {
   for (const window of report.reports ?? []) {
     console.log(`  ${String(window.window ?? window.id).padEnd(8)} ${JSON.stringify(window)}`);
   }
-  for (const observation of report.observations ?? []) {
+  // The chaos app writes observations as an array, the e2e apps as an object by window.
+  const observations = report.observations ?? [];
+  for (const observation of Array.isArray(observations) ? observations : Object.values(observations)) {
     console.log(`  ${JSON.stringify(observation)}`);
   }
   if (report.events) console.log(`  events: ${JSON.stringify(report.events)}`);

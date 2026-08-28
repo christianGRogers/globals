@@ -66,7 +66,7 @@ const workers = Array.from({ length: readerCount }, (_unused, id) => {
     const report = message.final ?? message.progress;
     if (report) reports.set(report.id, report);
   });
-  worker.on("error", (error) => {
+  worker.on("error", (error: Error) => {
     console.error(`reader ${id} crashed: ${error.message}`);
     process.exitCode = 1;
   });

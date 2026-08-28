@@ -55,6 +55,12 @@ const SPIKES = {
     entry: "04-read-latency/index.mjs",
     gate: "shared read at least 50 times faster than an IPC round trip",
   },
+  "08": {
+    name: "mmap through a native accessor, sandbox off",
+    runtime: "electron",
+    entry: "08-mmap-accessor/main.mjs",
+    gate: "one mapped region visible across renderer processes, read at least 50 times faster than IPC",
+  },
 };
 
 function list() {

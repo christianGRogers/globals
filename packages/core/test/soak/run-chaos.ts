@@ -70,7 +70,7 @@ function open(id: number): void {
     const report = message.final ?? message.progress;
     if (report) reports.set(report.id, merge(reports.get(report.id), report));
   });
-  worker.on("error", (error) => {
+  worker.on("error", (error: Error) => {
     console.error(`window ${id} crashed unexpectedly: ${error.message}`);
     process.exitCode = 1;
   });

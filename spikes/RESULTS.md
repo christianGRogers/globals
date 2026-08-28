@@ -26,7 +26,7 @@ direction, so both are recorded.
 | `MessageChannelMain` port, main brokered | No, `messageerror` | **Yes**, three distinct pids | No |
 | `window.open` plus `postMessage` | **Yes**, both directions | **No**, one pid for every window | No |
 | `BroadcastChannel` | No, silently dropped | Yes | No |
-| `SharedWorker` | Never connected over a custom protocol | n/a | No |
+| `SharedWorker` | No, dropped in both directions | Yes, pages in two processes | No |
 
 The two rows that matter are the first two, and they are exclusive. The mechanism that keeps
 windows in separate processes will not carry the buffer. The mechanism that carries the buffer
@@ -74,6 +74,14 @@ the decision between them is a product decision rather than a technical one:
    windows is gone. That is a real product for applications that render only their own UI and
    would accept the trade, but it is a much narrower claim than the one the plan opens with.
 3. **Stop.** The gate is the gate.
+4. **Step outside the web platform.** Spike 08 measured the route the web APIs cannot
+   offer: a file-backed region mapped into every process by an N-API addon and read through
+   native accessor calls, which keeps the V8 memory cage out of the picture. It delivers the
+   original contract, synchronous cross-process reads with zero torn reads under a full rate
+   writer and accessor reads at 14 ns against a 35 µs IPC round trip, at the price the
+   original gate refused to pay: `sandbox: false` on every window that maps the arena.
+   That is not a pass of the gate. It is a different product with the same API and a heavier
+   trust sentence, and it is measured rather than hypothesised.
 
 ## Status of each spike
 
@@ -85,7 +93,8 @@ the decision between them is a product decision rather than a technical one:
 | 04 read latency | Run, Node arm only | PASS with a large margin |
 | 05 window.open | Run | PASS, this is the mechanism the library must use |
 | 06 BroadcastChannel | Run | FAIL |
-| 07 SharedWorker | Run | Inconclusive, treated as unavailable |
+| 07 SharedWorker | Rerun, instrumented | FAIL in both directions, and the reason closes the question |
+| 08 native mmap, sandbox off | Run, macOS arm64 | PASS, 14 ns accessor reads, zero torn reads, ~2500x IPC |
 
 ## Spike 01, the negative result
 
@@ -145,6 +154,88 @@ crosses it, so the page receives an object carrying the port's own properties an
 prototype. Calling `start()` or `addEventListener()` on it throws. The way to get a working
 port into the main world is `window.postMessage` from the preload with the port in the
 transfer list.
+
+## Spike 07, the closing result
+
+The first run recorded "never connected over a custom protocol and surfaced no error", and
+that conclusion was wrong. Rerun with the worker instrumented (macOS arm64, Electron 33.4.11
+and 44.0.0, 2026-08-28), the worker connects on every transport, including the custom
+scheme. It had been dying at top level on `new SharedArrayBuffer`, because a shared worker's
+global scope is not cross origin isolated even when its script is served with
+`Cross-Origin-Embedder-Policy: require-corp`, and a runtime error inside a SharedWorker
+surfaces nothing in the pages that created it. The original result was silence mistaken for
+absence.
+
+With the worker unable to throw and reporting its own state, every variant fails on the
+transfer itself:
+
+| Variant | Electron | Worker connects | SAB in worker scope | Buffer crosses |
+| --- | --- | --- | --- | --- |
+| custom scheme, COOP and COEP | 33 | yes | absent, constructor throws | no, page's seed dropped |
+| localhost HTTP, COOP and COEP | 33 | yes, pages in two processes | absent | no, page's seed dropped |
+| HTTP plus the `SharedArrayBuffer` feature flag | 33 | yes | present | no, `messageerror` in both pages |
+| HTTP plus flag, no isolation headers anywhere | 33 | yes | present | no, `messageerror` in both pages |
+| localhost HTTP, COOP and COEP | 44, Chromium 152 | yes | absent | no, page's seed dropped |
+| HTTP plus flag | 44 | yes | present | no, `messageerror` in both pages |
+
+Both directions are dropped: worker to page and page to worker. Headers do not change it,
+the flag that exposes the constructor does not change it, and nineteen Chromium majors do
+not change it.
+
+The reason is in the HTML specification rather than in Electron. A `SharedArrayBuffer`
+deserialises only within one agent cluster, and a shared worker agent is allocated an agent
+cluster of its own, never the one the windows share. The same rule accounts for every
+mechanism this phase measured: same origin windows related by `window.open` share a cluster,
+so the buffer crosses there (spike 05), and Chromium keeps a cluster in one process, which
+is why those windows colocate; independent windows are separate clusters, which is why the
+port and the broadcast drop the buffer. The premise, shared memory read synchronously
+across renderer processes, is not a missing Electron feature or a Chromium bug. The
+platform defines shared memory as intra cluster, and maps cluster boundaries onto exactly
+the process boundaries the premise needed to cross.
+
+The rerun also hardened the spike against the mistake spike 05 made: it reports each page's
+OS process id and requires them to differ, and it requires each page to observe the other's
+write through its own mapping of the buffer rather than through a relayed message.
+
+## Spike 08, the route outside the platform
+
+macOS arm64, Electron 33.4.11, 2026-08-28. A 1 MB file-backed region mapped by an N-API
+addon into the main process and two renderer processes, all pids confirmed distinct. The
+renderers run `sandbox: false` with context isolation on; the addon lives in the preload and
+the page reaches it only through `contextBridge`.
+
+```
+owner value seen through the mapping:      both pages
+peer write seen directly through memory:   both directions
+torture, writer publishing at full rate:   770k+ consistent reads, 0 violations
+
+raw accessor read (one N-API call)         13-16 ns
+seqlock record read, 64 doubles validated  256-289 ns
+1 MB copy into an in-cage buffer           15-17 us
+read crossing contextBridge                0.5-1.1 us
+real ipcRenderer.invoke round trip         35-40 us
+
+gate: PASS, threshold is 50 times, measured ~2500
+```
+
+Reading of this result:
+
+- The premise is physically available outside the web APIs. The kernel maps the region into
+  every process and the atomics hold, exactly as spike 02 predicted for the protocol.
+- The V8 memory cage is routed around, not fought: no ArrayBuffer ever wraps the shared
+  region. Accessor calls cost 13 to 16 ns, and the real decoded read the library already
+  benchmarks at 418 ns would not notice the transport underneath it.
+- The copy on version change hybrid is nearly free: a 14 ns version check per read and a
+  16 µs memcpy per commit buy full speed TypedArray reads from an ordinary in-cage copy,
+  with no unsupported behaviour anywhere.
+- `contextBridge` is the expensive boundary now, at about a microsecond per crossing. The
+  decode layer belongs preload side, or reads cross the bridge batched.
+- The `--remap` arm, `MAP_FIXED` over an in-cage ArrayBuffer, also ran clean: the remapped
+  TypedArray is live shared memory read at 0.80 ns. An existence proof with documented
+  survival conditions, not a foundation.
+- What it costs: the Chromium sandbox, off, for every window that maps the arena. The
+  original gate refused exactly this trade, so this is off ramp four rather than a pass.
+  Unmeasured so far: Windows, Linux, other Electron majors, soak length behaviour.
 
 ## Spike 02, atomics torture
 
@@ -224,3 +315,8 @@ Reading of this result:
 The plan said to stop the project if a buffer cannot reach a sandboxed renderer without
 disabling the sandbox. The sandbox was never the obstacle: the process boundary is. Which off
 ramp to take is a product decision, and the three are set out above.
+
+The spike 07 rerun settled how final this is. The transfer is refused by the HTML
+specification's agent cluster rule, not by an Electron serializer gap, so no header, flag,
+privilege, or future Chromium version changes the answer. The last mechanism is measured,
+and the gate failure is a property of the web platform.
