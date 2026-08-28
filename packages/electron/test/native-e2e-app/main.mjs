@@ -64,7 +64,7 @@ async function main() {
 
   let owner;
   try {
-    owner = startNativeOwner({
+    owner = await startNativeOwner({
       regionPath,
       initial: {
         counter: 1,

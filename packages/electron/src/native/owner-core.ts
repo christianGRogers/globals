@@ -16,6 +16,8 @@
 import { OwnerStore, type OwnerOptions } from "@globals/core";
 import { OwnerRegion } from "@globals/shm";
 
+import { SnapshotStore, type PersistenceOptions } from "../persistence.js";
+
 /** A named write the owner is willing to apply. Everything a window may do is one of these. */
 export type NativeOperation<State, Payload = unknown> = (draft: State, payload: Payload) => void;
 
@@ -31,12 +33,16 @@ export interface NativeOwnerOptions<State> {
   byteLength?: number;
   /** Core arena options other than size, passed through. */
   arena?: Omit<OwnerOptions, "byteLength" | "maxByteLength">;
+  /** An already constructed snapshot store to save every commit into. */
+  snapshots?: SnapshotStore;
 }
 
 export interface NativeOwner<State> {
   /** The core store, for reads, subscriptions, and direct writes from the owning process. */
   readonly store: OwnerStore;
   readonly regionPath: string;
+  /** The snapshot store saving commits, when persistence is configured. */
+  readonly snapshots: SnapshotStore | undefined;
   /** The region version: the number of commits flushed. */
   version(): number;
   /** Apply a named operation, the same call a window's dispatch arrives as. */
@@ -65,13 +71,18 @@ export function createNativeOwner<State>(options: NativeOwnerOptions<State>): Na
 
   // OwnerStore.create committed the initial state before anyone could subscribe.
   flush();
+  const snapshots = options.snapshots;
   const unsubscribe = store.subscribe(() => {
     flush();
+    // The flush above published the bytes; this queues the debounced durable copy, which
+    // must never sit on the commit path.
+    snapshots?.save(store.snapshot().toJSON(), store.version);
   });
 
   return {
     store,
     regionPath: options.regionPath,
+    snapshots,
     version: () => region.version(),
     dispatch(operation, payload) {
       const apply = operations[operation];
@@ -89,8 +100,26 @@ export function createNativeOwner<State>(options: NativeOwnerOptions<State>): Na
     },
     close() {
       unsubscribe();
+      void snapshots?.flush();
       store.close();
       region.close();
     },
   };
+}
+
+/**
+ * Create the owner with persistence: rehydrate the last saved snapshot if one exists, use
+ * the configured initial state otherwise, and save every commit from then on. Asynchronous
+ * because rehydration reads a file, and startup is the one place that wait belongs.
+ */
+export async function restoreNativeOwner<State>(
+  options: NativeOwnerOptions<State> & { persistence: PersistenceOptions },
+): Promise<NativeOwner<State>> {
+  const snapshots = new SnapshotStore(options.persistence);
+  const loaded = await snapshots.load();
+  return createNativeOwner({
+    ...options,
+    initial: (loaded?.value ?? options.initial) as State,
+    snapshots,
+  });
 }

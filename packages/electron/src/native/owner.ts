@@ -10,19 +10,42 @@ import { app, ipcMain } from "electron";
 import type { WebContents } from "electron";
 import { join } from "node:path";
 
+import type { PersistenceOptions } from "../persistence.js";
 import { COMMIT, DISPATCH, HELLO, type DispatchMessage, type Hello } from "./channel.js";
-import { createNativeOwner, type NativeOwner, type NativeOwnerOptions } from "./owner-core.js";
+import {
+  createNativeOwner,
+  restoreNativeOwner,
+  type NativeOwner,
+  type NativeOwnerOptions,
+} from "./owner-core.js";
 
 export type { NativeOperation, NativeOwner, NativeOwnerOptions } from "./owner-core.js";
 
-export interface StartNativeOwnerOptions<State> extends Omit<NativeOwnerOptions<State>, "regionPath"> {
+export interface StartNativeOwnerOptions<State>
+  extends Omit<NativeOwnerOptions<State>, "regionPath" | "snapshots"> {
   /** Defaults to a file named globals.region under the app's userData directory. */
   regionPath?: string;
+  /**
+   * Persist commits and rehydrate on start. The file defaults to globals.snapshot.json
+   * under the app's userData directory.
+   */
+  persistence?: Omit<PersistenceOptions, "file"> & { file?: string };
 }
 
-export function startNativeOwner<State>(options: StartNativeOwnerOptions<State>): NativeOwner<State> {
+export async function startNativeOwner<State>(
+  options: StartNativeOwnerOptions<State>,
+): Promise<NativeOwner<State>> {
   const regionPath = options.regionPath ?? join(app.getPath("userData"), "globals.region");
-  const owner = createNativeOwner({ ...options, regionPath });
+  const owner = options.persistence
+    ? await restoreNativeOwner({
+        ...options,
+        regionPath,
+        persistence: {
+          file: join(app.getPath("userData"), "globals.snapshot.json"),
+          ...options.persistence,
+        },
+      })
+    : createNativeOwner({ ...options, regionPath });
 
   const subscribers = new Set<WebContents>();
   ipcMain.handle(HELLO, (event): Hello => {
@@ -46,10 +69,17 @@ export function startNativeOwner<State>(options: StartNativeOwnerOptions<State>)
     }
   });
 
+  // A debounced snapshot that never gets its final write is a stale rehydrate next boot.
+  const onQuit = (): void => {
+    void owner.snapshots?.flush();
+  };
+  if (owner.snapshots) app.on("before-quit", onQuit);
+
   return {
     ...owner,
     close() {
       unsubscribe();
+      app.removeListener("before-quit", onQuit);
       ipcMain.removeHandler(HELLO);
       ipcMain.removeHandler(DISPATCH);
       subscribers.clear();

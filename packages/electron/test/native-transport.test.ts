@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createNativeOwner } from "../src/native/owner-core.js";
+import { createNativeOwner, restoreNativeOwner } from "../src/native/owner-core.js";
 import { NativeReaderSource } from "../src/native/reader-core.js";
 
 const dir = mkdtempSync(join(tmpdir(), "globals-native-"));
@@ -113,6 +113,28 @@ test("notify fires subscribers once per version change, and reads never depend o
 
   source.close();
   owner.close();
+});
+
+test("a persisted owner rehydrates the last flushed snapshot", async () => {
+  const file = join(dir, "snapshot.json");
+  const persistence = { file, debounceMs: 5 };
+
+  const first = await restoreNativeOwner({ ...options(regionPath()), persistence });
+  await first.dispatch("increment", { by: 9 });
+  await first.snapshots?.flush();
+  first.close();
+
+  const second = await restoreNativeOwner({ ...options(regionPath()), persistence });
+  assert.equal(
+    second.store.select(["count"]),
+    9,
+    "the rehydrated owner must start from the flushed snapshot, not the configured initial",
+  );
+
+  const source = NativeReaderSource.attach(second.regionPath);
+  assert.equal(source.select(["count"]), 9, "and the region holds the rehydrated commit");
+  source.close();
+  second.close();
 });
 
 test("the owner reads its own store on the same contract", async () => {
