@@ -17,6 +17,9 @@ on:
 permissions:
   contents: read
 
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
 jobs:
   soak:
     name: soak, ${{ matrix.os }}
@@ -40,6 +43,17 @@ jobs:
           --readers ${{ inputs.readers || '8' }}
           --seconds ${{ inputs.seconds || '3600' }}
           --report soak-results/${{ matrix.os }}.json
+      - name: chaos
+        run: >
+          node packages/core/dist/test/soak/run-chaos.js
+          --windows 8 --seconds 600
+          --report soak-results/chaos-${{ matrix.os }}.json
+      - name: decoder fuzz
+        run: >
+          node packages/core/dist/test/fuzz/run-fuzz.js
+          --iterations 20000
+          --seed ${{ github.run_number }}
+          --report soak-results/fuzz-${{ matrix.os }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

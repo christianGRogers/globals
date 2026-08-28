@@ -37,18 +37,23 @@ branch, and that merge is performed by the repository owner.
 
 ## Phase branches
 
-The development plan is split into gated phases. Each has its own feature branch.
+The development plan is split into gated phases. Each has its own branch, and none of them
+are deleted, so the history of each phase stays inspectable.
 
-| Branch | Phase | Gate |
+| Branch | Phase | Gate status |
 | --- | --- | --- |
-| `feature/p0-feasibility-spikes` | P0 Feasibility spikes | Buffer crosses processes, atomics hold, reads beat IPC by 50x |
-| `chore/ci-pipeline` | Continuous integration foundation | Build, test, and docs checks run on every push |
-| `feature/p1-arena` | P1 The arena | Soak run with eight readers and zero inconsistent reads |
-| `feature/p2-object-layer` | P2 The object layer | Realistic state round trips, bounded write allocation |
-| `feature/p3-electron-integration` | P3 Electron integration | Chaos test leaves no leak, no stuck epoch, no bad read |
-| `feature/p4-bindings-dx` | P4 Bindings and developer experience | Example app built from published docs alone |
-| `feature/p5-hardening` | P5 Hardening | Green matrix, clean fuzz run, honest security note |
-| `release/0.1.0` | P6 Release | Package split, docs, migration notes, stability statement |
+| `feature/p0-feasibility-spikes` | P0 Feasibility spikes | Partly cleared. Atomics and read latency measured and passing. Buffer sharing unproven: spike 01 could not run without a display. |
+| `chore/ci-pipeline` | Continuous integration foundation | Cleared |
+| `feature/p1-arena` | P1 The arena | Cleared on a five minute soak. The plan asks for twenty four hours, which is a release gate. |
+| `feature/p2-object-layer` | P2 The object layer | Cleared. Bounded write allocation asserted by test. |
+| `feature/p3-electron-integration` | P3 Electron integration | Half cleared. The runtime agnostic chaos harness passes. The Electron one has not run. |
+| `feature/p4-bindings-dx` | P4 Bindings and developer experience | Deliverables complete. The gate asks for an application built by someone else from the docs alone, which has not happened. |
+| `feature/p5-hardening` | P5 Hardening | Two of three. Clean fuzz run and a written security note. No outside reviewer has read it, and the matrix has only run on one machine. |
+| `release/0.1.0` | P6 Release | Deliverables complete |
+
+Gate status is tracked here rather than only in the plan, because a branch that merged is not
+the same as a gate that passed, and conflating the two is how a project convinces itself it is
+further along than it is.
 
 ## Commit message format
 
