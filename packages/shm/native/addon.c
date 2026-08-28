@@ -205,7 +205,9 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
 #endif
 
 #ifdef _WIN32
-  HANDLE file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
+  /* A reader's mapping is read only, enforced by the OS rather than by convention: no
+   * window that attaches can corrupt shared state, whatever else it can do. */
+  HANDLE file = CreateFileA(path, create ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ,
                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                             create ? OPEN_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (file == INVALID_HANDLE_VALUE) {
@@ -243,21 +245,23 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
       return fail(env, "ESHM_IO", "could not size the region file");
     }
   }
-  r->mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+  r->mapping = CreateFileMappingA(file, NULL, create ? PAGE_READWRITE : PAGE_READONLY, 0, 0, NULL);
   CloseHandle(file);
   if (r->mapping == NULL) {
     free(r);
     return fail(env, "ESHM_IO", "could not create the file mapping");
   }
-  r->map = (volatile uint8_t*)MapViewOfFile(r->mapping, FILE_MAP_ALL_ACCESS, 0, 0,
-                                            (SIZE_T)(HEADER_BYTES + 2u * data_size));
+  r->map = (volatile uint8_t*)MapViewOfFile(r->mapping, create ? FILE_MAP_ALL_ACCESS : FILE_MAP_READ,
+                                            0, 0, (SIZE_T)(HEADER_BYTES + 2u * data_size));
   if (r->map == NULL) {
     CloseHandle(r->mapping);
     free(r);
     return fail(env, "ESHM_IO", "could not map the region");
   }
 #else
-  r->fd = open(path, O_RDWR | (create ? O_CREAT : 0), 0600);
+  /* A reader's mapping is read only, enforced by the OS rather than by convention: no
+   * window that attaches can corrupt shared state, whatever else it can do. */
+  r->fd = open(path, create ? (O_RDWR | O_CREAT) : O_RDONLY, 0600);
   if (r->fd < 0) {
     free(r);
     return fail(env, "ESHM_IO", create ? "could not create the region file" : "could not open the region file");
@@ -288,7 +292,8 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
     free(r);
     return fail(env, "ESHM_IO", "could not size the region file");
   }
-  void* p = mmap(NULL, HEADER_BYTES + 2u * data_size, PROT_READ | PROT_WRITE, MAP_SHARED, r->fd, 0);
+  void* p = mmap(NULL, HEADER_BYTES + 2u * data_size,
+                 create ? (PROT_READ | PROT_WRITE) : PROT_READ, MAP_SHARED, r->fd, 0);
   if (p == MAP_FAILED) {
     close(r->fd);
     free(r);
