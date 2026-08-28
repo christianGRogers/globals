@@ -49,6 +49,8 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: build the native transport addon
+        run: npm run build:native
       - name: typecheck and build
         run: npm run build
       - name: unit and property tests

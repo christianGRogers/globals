@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
+    "build:native": "npm run build:native --workspace @globals/shm",
     "clean": "tsc --build tsconfig.build.json --clean",
     "typecheck": "tsc --build tsconfig.build.json --pretty",
     "test": "npm run build && node scripts/run-tests.mjs",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
+    "node-gyp": "^11.0.0",
     "@types/react": "^19.2.18",
     "electron": "^33.4.11",
     "react": "^19.2.8",

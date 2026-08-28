@@ -1,0 +1,25 @@
+{
+  "name": "@globals/shm",
+  "version": "0.1.0",
+  "description": "The native transport: one file-backed shared memory region, an owning writer, and seqlock-consistent reader copies, through Node-API so the V8 memory cage is never involved.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": ["dist/src", "native/addon.c", "native/binding.gyp", "README.md"],
+  "scripts": {
+    "build:native": "cd native && node-gyp rebuild"
+  },
+  "engines": { "node": ">=20.11.0" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianGRogers/globals.git",
+    "directory": "packages/shm"
+  }
+}
