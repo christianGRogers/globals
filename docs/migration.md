@@ -6,6 +6,12 @@ Moving from a message passing store, and the cases where you should not.
 
 This section is first on purpose. Most Electron applications should stay where they are.
 
+**You are not willing to run your UI windows with `sandbox: false`.** This is the first
+entry because it decides alone. A window that reads shared state synchronously runs without
+the Chromium sandbox, which is the trade [trust-model.md](trust-model.md) opens with. If
+that sentence does not survive your threat model, stop here; the asynchronous tier keeps
+the sandbox but is not what you came for.
+
 **Your state is small and your windows are few.** Two windows sharing a settings object do
 not need shared memory. A replicated copy costs kilobytes and a message per change, and the
 whole apparatus here buys you nothing.
@@ -15,14 +21,9 @@ that needs a value now. If your components read from a replicated local copy tha
 in memory, you already have a synchronous read. Ours is faster to keep in sync, not faster to
 read.
 
-**You load content you do not control into windows that need the state.** Every window that
-maps the arena can write to it. Read [trust-model.md](trust-model.md) before going further.
-The per window opt out exists, and if most of your windows need it, the shared tier is not
-buying you much.
-
-**You serve your UI from `file://` and cannot change that.** Cross origin isolation requires
-COOP and COEP headers, which cannot be set on `file://`. Moving to a custom protocol is the
-price of entry and there is no way around it that keeps the sandbox on.
+**You load content you do not control into windows that need the state.** Those windows
+belong on the asynchronous tier with their sandbox intact, and if most of your windows are
+like that, the shared tier is not buying you much.
 
 **You need durable undo, or state larger than memory.** This is a shared snapshot of live
 state, not a database. Retention is bounded and history is a debugging aid.
@@ -35,12 +36,12 @@ paint of a new window waiting on a state transfer.
 
 | Message passing store | This library |
 | --- | --- |
-| Each window holds a replicated copy | One copy, mapped into every window |
-| A new window waits for a state transfer | A new window has the buffer before its first render |
-| Reads are synchronous against the local copy | Reads are synchronous against shared memory |
+| Each window holds a replicated copy it must patch | A private copy refreshed by one memcpy per commit observed |
+| A new window waits for a state transfer | A new window maps the region and syncs before its first render |
+| Sync arrives when the message does | Reads can never observe a stale version: a 14 ns check per read |
 | Writes are asynchronous | Writes are asynchronous, unchanged |
-| State lives in the main process | State lives in a hidden owner window |
-| Memory is N copies | Memory is one arena, plus bounded retention |
+| State lives in the main process | State lives in the main process, unchanged |
+| Windows keep the sandbox | Windows that read synchronously give it up; the rest keep it |
 
 The write side barely changes. If you already dispatch named actions and await them, that
 code moves across almost unaltered.
