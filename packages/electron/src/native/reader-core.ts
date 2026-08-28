@@ -74,9 +74,15 @@ export class NativeReaderSource implements ReadableStore {
     if (this.#store === null || version !== this.#held) {
       // A fresh private buffer per observed commit. The previous store is dropped, not
       // closed: snapshots taken from it keep their buffer alive until they are collected.
-      const copy = new SharedArrayBuffer(this.#region.dataSize);
+      //
+      // A plain ArrayBuffer, deliberately. Blink hides the SharedArrayBuffer constructor
+      // from a renderer that is not cross origin isolated, unsandboxed preloads included,
+      // and nothing here needs sharing: the buffer is this process's private copy. Atomics
+      // operate on non-shared buffers, and the read path never waits, so the core reader
+      // works unchanged; only its declared type expects the shared flavour.
+      const copy = new ArrayBuffer(this.#region.dataSize);
       this.#held = this.#region.sync(new Uint8Array(copy));
-      this.#store = new ReaderStore(copy);
+      this.#store = new ReaderStore(copy as unknown as SharedArrayBuffer);
     }
     return this.#store;
   }
