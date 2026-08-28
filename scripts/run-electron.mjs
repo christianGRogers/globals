@@ -97,6 +97,7 @@ export function printReport(entry, report, reportPath) {
     console.log(`  ${JSON.stringify(observation)}`);
   }
   if (report.events) console.log(`  events: ${JSON.stringify(report.events)}`);
+  for (const line of report.rendererLog ?? []) console.log(`  ${line}`);
 
   console.log("");
   for (const check of report.checks ?? []) {

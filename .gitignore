@@ -16,3 +16,4 @@ bench-results/
 soak-results/*.json
 spikes/*/spike01-result.json
 packages/electron/test/chaos-app/chaos-result.json
+spikes/*/spike0*-result.json

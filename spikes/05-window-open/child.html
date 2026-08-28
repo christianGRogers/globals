@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>child</title>
+<body>
+<pre id="log"></pre>
+<script type="module">
+const log = (line) => {
+  document.getElementById("log").textContent += line + "\n";
+  console.log(line);
+};
+
+log(`child crossOriginIsolated=${self.crossOriginIsolated}`);
+
+window.addEventListener("messageerror", () => {
+  log("MESSAGEERROR in the opened window: the payload could not be deserialised here");
+  window.opener.postMessage({ kind: "child-result", received: false, deserialised: false }, "*");
+});
+
+window.addEventListener("message", (event) => {
+  if (!event.data || event.data.kind !== "buffer") return;
+  const sab = event.data.sab;
+  const i32 = new Int32Array(sab);
+  const sawOwnerValue = Atomics.load(i32, 0) === 0xC0FFEE;
+  log(`RECEIVED ${sab.byteLength} bytes, owner value seen: ${sawOwnerValue}`);
+  Atomics.store(i32, 1, 0xFACE);
+  window.opener.postMessage(
+    { kind: "child-result", received: true, sawOwnerValue },
+    "*",
+  );
+});
+
+window.opener.postMessage("child-ready", "*");
+</script>

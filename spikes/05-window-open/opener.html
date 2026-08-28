@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>opener</title>
+<body>
+<pre id="log"></pre>
+<script type="module">
+const log = (line) => {
+  document.getElementById("log").textContent += line + "\n";
+  console.log(line);
+};
+
+log(`opener crossOriginIsolated=${self.crossOriginIsolated}`);
+
+const sab = new SharedArrayBuffer(1024);
+new Int32Array(sab)[0] = 0xC0FFEE;
+
+// window.open creates a related browsing context. A post to it goes through Chromium's own
+// window messaging rather than through Electron's serializer, which is the difference this
+// spike exists to measure.
+const child = window.open("child.html", "child");
+
+if (child === null) {
+  log("WINDOW_OPEN_BLOCKED");
+  window.spike.report({ window: "opener", blocked: true });
+} else {
+  window.addEventListener("message", (event) => {
+    if (event.data === "child-ready") {
+      try {
+        child.postMessage({ kind: "buffer", sab }, "*");
+        log("posted the buffer to the opened window");
+      } catch (error) {
+        log(`POSTING THREW: ${error.name}: ${error.message}`);
+        window.spike.report({ window: "opener", postThrew: error.message });
+      }
+    }
+    if (event.data && event.data.kind === "child-result") {
+      const readerValue = new Int32Array(sab)[1];
+      log(`child reported: ${JSON.stringify(event.data)}`);
+      window.spike.report({
+        window: "opener",
+        crossOriginIsolated: self.crossOriginIsolated === true,
+        sandboxed: window.spike.sandboxed,
+        childReceived: event.data.received,
+        childSawOwnerValue: event.data.sawOwnerValue,
+        ownerSawChildWrite: readerValue === 0xFACE,
+      });
+    }
+  });
+}
+</script>
