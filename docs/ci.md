@@ -4,11 +4,29 @@
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| `ci` | Every push and pull request | Build, typecheck, tests, documentation checks, the Node runnable spikes |
-| `soak` | Nightly at 03:00 UTC and on demand | The multi process soak that gates arena changes |
-| `electron-matrix` | Weekly, on demand, and on `packages/electron` changes | Spike 01 across supported Electron majors and platforms, plus a beta canary |
+| `ci` | Every push and pull request | Build, typecheck, tests, documentation checks, the Node runnable spikes, and short soak, chaos, and fuzz runs |
+| `soak` | Nightly at 03:00 UTC and on demand | The long soak, chaos, and fuzz runs that gate arena changes |
+| `electron-matrix` | Weekly, on demand, and on `packages/electron` changes | Spike 01 and the window lifecycle chaos app across supported Electron majors and platforms, plus a beta canary |
 | `codeql` | Push, pull request, weekly | Static analysis |
 | `release` | A `v*` tag | Verifies the tag sits on `main` and matches the package version, then publishes |
+
+### Jobs in `ci`
+
+| Job | What it proves |
+| --- | --- |
+| `docs` | House style and link integrity across every markdown file |
+| `build` | The workspace builds and every test passes, on three platforms and two Node majors |
+| `spikes` | The atomics protocol and the read latency assumption still hold |
+| `smoke-soak` | Ninety seconds of soak, sixty seconds of chaos, and 1200 fuzz rounds |
+
+The short runs in `smoke-soak` are deliberately short. They catch a change that breaks the
+arena outright. They do not catch a race that shows up once in a million reads, which is what
+the nightly runs are for.
+
+`ELECTRON_SKIP_BINARY_DOWNLOAD` is set on `ci` and `soak`. Those jobs need the Electron types
+to typecheck the integration package and never run Electron itself, so downloading a hundred
+megabyte binary on every job in a six way matrix would cost minutes for nothing. The
+`electron-matrix` workflow installs it properly where it is actually used.
 
 ## The matrix and why it is wide
 
@@ -28,7 +46,7 @@ internals, so each supported major is exercised rather than assumed. The beta ca
 | `build and test` on all six combinations | Yes |
 | `phase 0 spikes` | Yes |
 | `codeql` | Yes |
-| `soak` | Not automatically, but a change to the arena or reclamation needs a soak result pasted into the pull request |
+| `soak`, the nightly one | Not automatically, but a change to the arena or reclamation needs a soak result pasted into the pull request |
 | `electron-matrix` | Yes for changes under `packages/electron` |
 
 ## Release flow
