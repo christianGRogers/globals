@@ -5,11 +5,20 @@ of real shared memory.
 
 > **Status: the feasibility gate has failed. Do not adopt this.**
 >
-> A `SharedArrayBuffer` does not cross a renderer process boundary in Electron 33 by any
-> mechanism measured. The one that delivers the buffer, `window.open`, puts every window in a
-> single renderer process, which is not the problem this library exists to solve. The
-> measurements, including process ids, are in [spikes/RESULTS.md](spikes/RESULTS.md), and the
-> options are the off ramps in [docs/plan.md](docs/plan.md).
+> A `SharedArrayBuffer` does not cross a renderer process boundary in Electron by any
+> mechanism measured, on Electron 33 or 44, with or without isolation headers or the feature
+> flag that exposes the constructor. The one mechanism that delivers the buffer,
+> `window.open`, puts every window in a single renderer process, which is not the problem
+> this library exists to solve. The refusal traces to the HTML specification's agent cluster
+> rule rather than to anything Electron could fix. The measurements, including process ids,
+> are in [spikes/RESULTS.md](spikes/RESULTS.md), and the options are the off ramps in
+> [docs/plan.md](docs/plan.md).
+>
+> One route outside the web platform has since been measured and works: a native addon
+> mapping one region into every process delivers the contract across real renderer
+> processes at 14 ns reads, in exchange for `sandbox: false` on the windows that map it.
+> That is a fourth off ramp with a heavier trust sentence, not a pass of the gate. See
+> [spikes/08-mmap-accessor/README.md](spikes/08-mmap-accessor/README.md).
 >
 > The core is unaffected and runs: it is runtime agnostic, tested, and reusable in any of the
 > off ramps. What fails is the Electron handshake.
@@ -100,7 +109,8 @@ Read in this order.
 | [devtools.md](docs/devtools.md) | Inspection and time travel |
 | [benchmarks.md](docs/benchmarks.md) | The numbers, and the harness behind them |
 | [stability.md](docs/stability.md) | The supported Electron range |
-| [plan.md](docs/plan.md) | The development plan and its gates |
+| [plan.md](docs/plan.md) | The original development plan and its gates |
+| [plan-native.md](docs/plan-native.md) | The successor plan: to a working library on the native transport |
 
 ## Repository layout
 
