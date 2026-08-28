@@ -48,8 +48,12 @@ jobs:
       - name: configure the SUID sandbox helper the Linux image requires
         if: runner.os == 'Linux'
         run: |
-          sudo chown root:root node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          if [ -e node_modules/electron/dist/chrome-sandbox ]; then
+            sudo chown root:root node_modules/electron/dist/chrome-sandbox
+            sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          else
+            echo "no chrome-sandbox in this build; the run step will say what that means"
+          fi
       - name: run the sharing spike, expecting the recorded FAIL
         shell: bash
         run: |
@@ -94,8 +98,12 @@ jobs:
       - name: configure the SUID sandbox helper the Linux image requires
         if: runner.os == 'Linux'
         run: |
-          sudo chown root:root node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          if [ -e node_modules/electron/dist/chrome-sandbox ]; then
+            sudo chown root:root node_modules/electron/dist/chrome-sandbox
+            sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          else
+            echo "no chrome-sandbox in this build; the run step will say what that means"
+          fi
       - name: build the spike 08 addon
         shell: bash
         run: cd spikes/08-mmap-accessor && npx node-gyp rebuild
@@ -143,8 +151,12 @@ jobs:
       - name: configure the SUID sandbox helper the Linux image requires
         if: runner.os == 'Linux'
         run: |
-          sudo chown root:root node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          if [ -e node_modules/electron/dist/chrome-sandbox ]; then
+            sudo chown root:root node_modules/electron/dist/chrome-sandbox
+            sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          else
+            echo "no chrome-sandbox in this build; the run step will say what that means"
+          fi
       - name: the earliest signal available that the answer changed
         shell: bash
         run: |
