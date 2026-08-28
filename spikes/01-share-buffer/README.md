@@ -35,12 +35,16 @@ The renderer asserts the sandbox condition through `process.sandboxed` and
 ## Running
 
 ```bash
-npm install --no-save electron@^33
-node spikes/run-spike.mjs 01
+npm install
+npm run gate
 ```
 
-The process exits 0 when every check passes and 1 otherwise, so it can be wired into a
-manual gate review.
+The process exits 0 when every check passes and 1 otherwise. A run that produces no report
+at all exits 1 too, but says explicitly that it is a broken run rather than a gate failure,
+because those are different answers and only one of them should send anyone to an off ramp.
+
+The verdict is also written to `spike01-result.json` beside this file, since an Electron main
+process on Windows is a GUI subsystem binary whose console output never reaches the parent.
 
 ## Note on the growth check
 

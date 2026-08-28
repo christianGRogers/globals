@@ -23,23 +23,71 @@ Stop the project if any of these fail.
 | [03-memory-cage](03-memory-cage) | Does the native addon route share or copy? | Node with a C toolchain |
 | [04-read-latency](04-read-latency) | How much faster is a shared read than IPC? | Node, and Electron for the IPC arm |
 
-## Running them
+## Running the gate
+
+Spike 01 is the go or no go for the whole project. Everything else is written against the
+claim that it passes.
 
 ```bash
-node spikes/run-spike.mjs list
-node spikes/run-spike.mjs 02        # runs in plain Node
-node spikes/run-spike.mjs 04        # runs in plain Node
-node spikes/run-spike.mjs 01        # requires a local Electron install
+npm install
+npm run gate
 ```
 
-The Electron spikes are not part of continuous integration. They need a display and a
-specific Electron version, and they are diagnostic rather than regression tests. Install
-Electron locally to run them:
+Electron is a saved development dependency, so `npm install` is all the setup there is. Three
+windows open, two of them visible. Leave them alone for about a second and they close on
+their own. The verdict prints in the terminal and is written to
+`spikes/01-share-buffer/spike01-result.json`.
+
+### Reading the result
+
+```
+PASS  crossOriginIsolated in every window
+PASS  sandbox and contextIsolation stayed on
+PASS  every reader received the buffer
+PASS  readers observed the owner write
+PASS  owner observed a reader write
+PASS  grow() was observed by readers
+
+gate: PASS, the topology is implementable on this Electron version
+```
+
+The checks are ordered so that the first failure tells you what kind of problem you have.
+
+| First failing check | What it means | What to do |
+| --- | --- | --- |
+| `crossOriginIsolated` | The protocol headers are not reaching the document | A spike bug, not a platform verdict. Nothing below it is meaningful. |
+| `sandbox and contextIsolation` | The window is not configured the way the gate requires | Same. The result is worthless without both on. |
+| `every reader received the buffer` | **The gate itself failed.** A `SharedArrayBuffer` will not cross to a sandboxed renderer on this Electron version | Take an off ramp in `docs/plan.md`. This is the answer the spike exists to get. |
+| `readers observed the owner write` | The transfer copied rather than shared | Same as above. The topology does not work. |
+| `owner observed a reader write` | Sharing is one directional | Surprising, and it would change the trust model rather than end the project. |
+| `grow() was observed` | Growth is not seen by processes already holding the buffer | Not fatal. Arena size becomes fixed at bootstrap and a rehandshake path is needed. |
+
+A run that produces no report at all is a broken run rather than a gate failure, and the
+runner says so rather than reporting a verdict it does not have.
+
+### The other Electron gate
+
+The window lifecycle chaos harness, which is the half of the phase 3 exit criterion that
+needs real renderer processes:
 
 ```bash
-npm install --no-save electron@^33
-node spikes/run-spike.mjs 01
+npm run gate:chaos
 ```
+
+Four windows are opened, reloaded, and crashed at random for a minute while the owner commits
+continuously. It asserts that no window reported an inconsistent read and that the owner
+survived. Its runtime agnostic counterpart, `npm run chaos`, already passes and covers the
+reclamation logic without a window manager.
+
+### Seeing it work
+
+```bash
+npm run gate:example
+```
+
+The four window example: a table of five thousand rows read synchronously on the render path,
+an editor that demonstrates the read after write contract, a debug panel, and a window on the
+asynchronous tier. See [examples/multi-window/README.md](../examples/multi-window/README.md).
 
 ## What the Node only spikes can and cannot prove
 

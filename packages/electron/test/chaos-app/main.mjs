@@ -9,8 +9,8 @@
  * protocol, cross origin isolation, real renderer processes, and a real crash rather than a
  * terminated worker thread.
  *
- *   npm install --no-save electron@^33
- *   npx electron packages/electron/test/chaos-app/main.mjs --seconds 60
+ *   npm install
+ *   npm run gate:chaos
  *
  * Like spike 01, the verdict goes to a JSON file: an Electron main process on Windows is a
  * GUI subsystem binary and its console output never reaches the parent pipe.
@@ -24,14 +24,19 @@ import { parseArgs } from "node:util";
 import { GlobalsHost, prepare, preloadPath } from "../../dist/src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Filtering argv down to things starting with two dashes looks like a reasonable way to
+// ignore the switches Electron injects. It is not: it drops the values as well, so
+// "--report path" parses as report being "--seconds". Tolerating unknown tokens is the
+// version that works.
 const { values } = parseArgs({
-  args: process.argv.slice(2).filter((argument) => argument.startsWith("--")),
+  args: process.argv.slice(2),
   options: {
     seconds: { type: "string", default: "60" },
     windows: { type: "string", default: "4" },
     report: { type: "string", default: join(here, "chaos-result.json") },
   },
   strict: false,
+  allowPositionals: true,
 });
 
 const durationMs = Number(values.seconds) * 1000;

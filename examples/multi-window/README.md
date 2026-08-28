@@ -4,9 +4,7 @@ Four windows over one shared state, with a table of five thousand rows.
 
 ```bash
 npm install
-npm run build
-npm install --no-save electron@^33
-npx electron examples/multi-window/main.mjs
+npm run gate:example
 ```
 
 ## What each window shows

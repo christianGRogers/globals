@@ -5,8 +5,8 @@
  * to it, and a stats panel that reads the same state without any replication. Plus a fourth
  * window on the asynchronous tier, to show what the trust model opt out actually looks like.
  *
- *   npm install --no-save electron@^33
- *   npx electron examples/multi-window/main.mjs
+ *   npm install
+ *   npm run gate:example
  */
 import { app, BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";

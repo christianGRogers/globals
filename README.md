@@ -4,9 +4,9 @@ Synchronous reads of shared application state across Electron processes, built o
 of real shared memory.
 
 > **Status: 0.1.0, pre-release.** The feasibility gate that decides whether this can work at
-> all has not been cleared on a machine with a display. Read
-> [docs/stability.md](docs/stability.md) and [docs/trust-model.md](docs/trust-model.md) before
-> adopting it.
+> all has not been cleared on a machine with a display. Run it yourself with `npm run gate`,
+> which takes about a second. Read [docs/stability.md](docs/stability.md) and
+> [docs/trust-model.md](docs/trust-model.md) before adopting it.
 
 ## The contract
 
@@ -121,6 +121,17 @@ npm run chaos     # windows opened, reloaded, frozen, and killed
 npm run fuzz      # the decoder against deliberately corrupted arenas
 npm run bench     # read latency
 ```
+
+Two checks need a real display and open windows, so they are not part of continuous
+integration on this machine:
+
+```bash
+npm run gate         # spike 01, the go or no go for the whole project
+npm run gate:chaos   # window lifecycle chaos, with real renderer processes
+npm run gate:example # the four window example application
+```
+
+What each verdict means is in [spikes/README.md](spikes/README.md).
 
 Branching follows a gitflow variant described in [docs/branching.md](docs/branching.md).
 Continuous integration is described in [docs/ci.md](docs/ci.md). Work lands on `dev`. Only a
