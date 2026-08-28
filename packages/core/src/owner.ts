@@ -28,6 +28,18 @@ export interface OwnerOptions {
    */
   retainedVersions?: number;
   verify?: VerifyModeValue;
+  /**
+   * How many superseded versions to keep readable for time travel.
+   *
+   * Zero, the default, reclaims a version as soon as no reader is pinned to it, which is the
+   * cheapest thing to do and leaves no history to browse. A positive value keeps that many
+   * versions behind the current one alive, at the cost of holding their path copies. It is
+   * capped at one less than the retained ring, because the ring is what bounds retention.
+   *
+   * Turn it on in development and leave it off in production, unless the application has a
+   * reason to browse history at runtime.
+   */
+  historyDepth?: number;
 }
 
 const DEFAULTS = {
@@ -36,6 +48,7 @@ const DEFAULTS = {
   maxReaders: 32,
   retainedVersions: 64,
   verify: VerifyMode.Header,
+  historyDepth: 0,
 } satisfies Required<OwnerOptions>;
 
 export interface OwnerStats {
@@ -49,6 +62,7 @@ export interface OwnerStats {
   readonly strandedBytes: number;
   readonly internedStrings: number;
   readonly pendingGarbageVersions: number;
+  readonly historyDepth: number;
   readonly reclaimFloor: number;
   readonly claimedReaders: number;
   readonly minimumPinnedEpoch: number;
@@ -79,6 +93,7 @@ export class ArenaOwner {
    * is freed, no later decision may lower the floor back over it.
    */
   #reclaimFloor = 0;
+  #historyDepth = 0;
   /**
    * Blocks that became unreachable when a version was superseded, keyed by the version
    * that still referenced them. Insertion order is ascending by version, which the
@@ -109,6 +124,10 @@ export class ArenaOwner {
       flags: settings.verify,
     });
     const owner = new ArenaOwner(arena);
+    owner.#historyDepth = Math.max(
+      0,
+      Math.min(settings.historyDepth, settings.retainedVersions - 1),
+    );
     owner.commit(undefined);
     return owner;
   }
@@ -298,7 +317,9 @@ export class ArenaOwner {
    */
   reclaim(): void {
     const firstScan = this.#readers.minimumPinnedEpoch();
-    const boundary = Math.min(firstScan, this.#versionId);
+    // History, when it is switched on, holds versions alive that nothing is pinned to. It is
+    // a deliberate cost rather than a free feature: those versions keep their path copies.
+    const boundary = Math.min(firstScan, this.#versionId - this.#historyDepth);
     this.#raiseFloor(Number.isFinite(boundary) ? boundary : 0);
 
     const secondScan = this.#readers.minimumPinnedEpoch();
@@ -397,6 +418,7 @@ export class ArenaOwner {
       strandedBytes: this.#allocator.strandedBytes(),
       internedStrings: this.#strings.size,
       pendingGarbageVersions: this.#garbage.size,
+      historyDepth: this.#historyDepth,
       reclaimFloor: this.arena.loadHeader(Header.ReclaimFloor),
       claimedReaders: this.#readers.claimedSlots().length,
       minimumPinnedEpoch: Number.isFinite(minimum) ? minimum : 0,

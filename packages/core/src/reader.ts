@@ -268,11 +268,67 @@ export class ArenaReader {
     return this.acquire().value;
   }
 
+  /**
+   * Pin a specific retained version rather than the current one.
+   *
+   * For debugging and time travel. It pins that version and everything after it against
+   * reclamation, so a snapshot obtained this way must be released. A render path should
+   * never use it.
+   *
+   * A reader owns one epoch slot, so this suspends the pin the render path was holding until
+   * the returned snapshot is released. A debug panel that browses history while a render
+   * reads should attach its own reader rather than share one, which costs a slot and keeps
+   * the two independent.
+   */
+  acquireVersion(versionId: number): Snapshot {
+    const entry = this.#ring.read(versionId);
+    if (entry === undefined || !this.#ring.isLive(versionId)) {
+      throw new StaleSnapshotError(versionId, this.reclaimFloor());
+    }
+
+    this.#table.pin(this.slot, versionId);
+
+    // Recheck after pinning, for the same reason acquire does: the pin has to be visible to
+    // the owner before the version can be trusted.
+    if (versionId < this.reclaimFloor() || !this.#ring.isLive(versionId)) {
+      this.#table.unpin(this.slot);
+      throw new StaleSnapshotError(versionId, this.reclaimFloor());
+    }
+
+    return new Snapshot(this, versionId, this.ownerGeneration(), {
+      tag: entry.rootTag,
+      payload: entry.rootPayload,
+    });
+  }
+
+  /** Materialise a retained version, pinning it only for the duration of the read. */
+  readVersion(versionId: number): unknown {
+    const held = this.#current;
+    const snapshot = this.acquireVersion(versionId);
+    try {
+      return snapshot.toJSON();
+    } finally {
+      // Restore the pin the caller had, so browsing history does not silently unpin the
+      // version a render is using.
+      if (held !== undefined && held.isValid()) this.#table.pin(this.slot, held.versionId);
+      else this.#table.unpin(this.slot);
+    }
+  }
+
   releaseSnapshot(snapshot: Snapshot): void {
     if (this.#current === snapshot) {
       this.#current = undefined;
       this.#table.unpin(this.slot);
+      return;
     }
+
+    // A historical snapshot from acquireVersion. A reader has one epoch slot, so pinning a
+    // past version suspends the pin the render path was holding. Releasing it restores that
+    // pin rather than leaving the reader unpinned or, worse, still holding the old version.
+    if (this.#table.pinnedEpoch(this.slot) !== snapshot.versionId) return;
+    const held = this.#current;
+    if (held !== undefined && held.isValid()) this.#table.pin(this.slot, held.versionId);
+    else this.#table.unpin(this.slot);
   }
 
   /** Release the pin and the reader slot. Always call this before dropping a reader. */

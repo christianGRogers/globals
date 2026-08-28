@@ -291,3 +291,31 @@ function lookupSlot(arena: SharedArena, node: number, key: string | number): Slo
 }
 
 export { VIEW_SLOT };
+
+/**
+ * Compare two values by the arena node behind them.
+ *
+ * The default equality for a selector is `Object.is`, and for a selector that returns a
+ * container that means a notification on every commit: each commit produces a new snapshot
+ * with a fresh decode cache, so the view object is a new proxy even when the underlying
+ * subtree did not move. Comparing the slots instead answers the question the selector
+ * actually cares about, which is whether the subtree changed.
+ *
+ * Why comparing offsets is sound here, since it looks like it should not be. A commit
+ * encodes the new value before it frees anything the old version held, so a newly written
+ * node can never land on the block the current version is using. The value a selector last
+ * saw is the current version's node, so a later node reusing that block always compares
+ * unequal to it. The comparison dereferences nothing, so a wild offset cannot make it
+ * misbehave either.
+ *
+ * It is still a comparison of representation rather than of value. Two structurally equal
+ * subtrees written separately are different nodes and compare unequal, which is the
+ * conservative direction: an extra render, never a missed one.
+ */
+export function sameNode(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  const left = viewSlot(a);
+  const right = viewSlot(b);
+  if (left === undefined || right === undefined) return false;
+  return left.tag === right.tag && left.payload === right.payload;
+}

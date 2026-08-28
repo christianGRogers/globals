@@ -8,6 +8,15 @@
       "path": "./packages/electron"
     },
     {
+      "path": "./packages/react"
+    },
+    {
+      "path": "./packages/vue"
+    },
+    {
+      "path": "./packages/svelte"
+    },
+    {
       "path": "./benchmarks"
     }
   ]

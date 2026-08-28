@@ -32,6 +32,13 @@ All notable changes to this project are recorded here. The format follows
 - Persistence with debounced writes and temp file plus rename discipline.
 - A chaos harness that opens, reloads, freezes, and kills simulated windows while a writer
   runs, plus its Electron counterpart for the electron-matrix workflow.
+- `@globals/react`, `@globals/vue`, and `@globals/svelte`, all over the same subscribe
+  and snapshot pair, with node comparing selectors for container slices.
+- `defineSchema` and the typed store interfaces, which keep a synchronous read and an
+  asynchronous write from looking alike at the call site.
+- Inspection: `formatArena`, `reportArena`, `reportReader`, and `diffShallow`.
+- `VersionHistory`, time travel over the retained ring, opt in through `historyDepth`.
+- A four window example application over five thousand shared rows.
 
 ### Fixed
 

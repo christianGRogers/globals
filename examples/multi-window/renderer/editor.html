@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>editor</title>
+<body style="font: 13px/1.6 system-ui; padding: 14px">
+<h1 style="font-size: 15px; margin: 0 0 10px">Editor</h1>
+<p style="color: #666">Selecting a row in the table window changes what this edits.</p>
+
+<div id="form">
+  <label>Name<br><input id="name" style="width: 100%"></label>
+  <label style="display: block; margin-top: 8px">Score<br><input id="score" type="number" min="0" max="99"></label>
+  <button id="toggle" style="margin-top: 10px">Toggle active</button>
+</div>
+
+<p style="margin-top: 16px; color: #666">
+  Writes are asynchronous. The line after a dispatch may still read the old value, which is
+  the contract rather than a defect. The check below proves it.
+</p>
+<pre id="proof" style="background: #f4f4f4; padding: 8px"></pre>
+
+<script type="module">
+import { connect } from "../../../packages/electron/dist/src/renderer.js";
+
+const store = await connect();
+const nameInput = document.getElementById("name");
+const scoreInput = document.getElementById("score");
+
+function currentId() {
+  return store.select(["selected"]) ?? 0;
+}
+
+function render() {
+  const id = currentId();
+  if (document.activeElement !== nameInput) {
+    nameInput.value = store.select(["rows", id, "name"]) ?? "";
+  }
+  if (document.activeElement !== scoreInput) {
+    scoreInput.value = String(store.select(["rows", id, "score"]) ?? 0);
+  }
+}
+
+nameInput.addEventListener("input", () => {
+  void store.dispatch("rename", { id: currentId(), name: nameInput.value });
+});
+
+scoreInput.addEventListener("input", () => {
+  void store.dispatch("setScore", { id: currentId(), score: Number(scoreInput.value) });
+});
+
+document.getElementById("toggle").addEventListener("click", () => {
+  void store.dispatch("toggle", { id: currentId() });
+});
+
+// A demonstration of the contract, run once at load rather than described in a comment.
+const id = currentId();
+const before = store.select(["rows", id, "name"]);
+const promise = store.dispatch("rename", { id, name: `${before} (edited)` });
+const immediately = store.select(["rows", id, "name"]);
+const after = await promise.then(() => store.select(["rows", id, "name"]));
+
+document.getElementById("proof").textContent = [
+  `before dispatch:        ${before}`,
+  `immediately after:      ${immediately}`,
+  `after awaiting:         ${after}`,
+  ``,
+  immediately === before
+    ? "The read on the next line returned the old value, as documented."
+    : "The write happened to land first. Do not rely on it.",
+].join("\n");
+
+store.subscribe(render);
+render();
+</script>

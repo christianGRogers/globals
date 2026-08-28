@@ -1,4 +1,4 @@
-import { ReaderStore, type Snapshot } from "@globals/core";
+import { ReaderStore, type ArenaReader, type Snapshot } from "@globals/core";
 
 import { isOwnerToWindow, type Intent, type OwnerToWindow } from "./messages.js";
 
@@ -38,6 +38,16 @@ export interface SharedConnection {
   dispatch(operation: string, payload?: unknown): Promise<number>;
   /** Fetch a value from the asynchronous tier by handle. */
   external(handle: number): Promise<unknown>;
+  /**
+   * The underlying reader.
+   *
+   * For diagnostics and for a debug panel that wants its own view of the arena. A panel that
+   * browses history should attach a second reader rather than reuse this one, because a
+   * reader owns one epoch slot and pinning a past version suspends the render pin.
+   */
+  readonly reader: ArenaReader;
+  /** The buffer, for a panel that wants to attach its own reader. */
+  readonly buffer: SharedArrayBuffer;
   readonly version: number;
   close(): void;
 }
@@ -175,8 +185,11 @@ export function connect(options: { timeoutMs?: number } = {}): Promise<Connectio
 
       function sharedConnection(): SharedConnection {
         const reader = store as ReaderStore;
+        const buffer = reader.reader.arena.buffer;
         return {
           tier: "shared",
+          reader: reader.reader,
+          buffer,
           get: () => reader.get(),
           select: (path) => reader.select(path),
           snapshot: () => reader.snapshot(),
