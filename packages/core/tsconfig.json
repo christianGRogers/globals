@@ -3,8 +3,16 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "./dist",
-    "lib": ["ES2022"],
-    "types": ["node"]
+    "lib": [
+      "ES2024"
+    ],
+    "types": [
+      "node"
+    ],
+    "noUncheckedIndexedAccess": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ]
 }

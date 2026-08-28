@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist",
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dist"],
+  "references": [{ "path": "../packages/core" }]
+}

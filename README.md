@@ -39,6 +39,17 @@ Three responses, all documented in [docs/trust-model.md](docs/trust-model.md):
 If your application loads third party content into a window that needs shared state, this
 library is the wrong tool.
 
+## How fast
+
+A shared read of a double costs 431 ns on the reference machine, against 36 microseconds for
+a structured clone round trip. That is 84 times faster, and roughly 120 times the cost of a
+plain local property read.
+
+The phase 0 spike modelled the read path and predicted 7.8 ns. The real path is slower
+because it validates the version on both sides of every decode and bounds checks every
+offset, neither of which is optional. The full numbers, the machine, and what was tuned are
+in [docs/benchmarks.md](docs/benchmarks.md).
+
 ## Repository layout
 
 | Path | Contents |
@@ -50,7 +61,7 @@ library is the wrong tool.
 | `packages/svelte` | Svelte store adapter |
 | `spikes` | Phase 0 feasibility spikes, throwaway by design |
 | `benchmarks` | The reproducible harness behind the numbers in the docs |
-| `docs` | Contract, architecture, trust model, decision records |
+| `docs` | Contract, architecture, trust model, reclamation, decision records |
 
 ## Development
 
