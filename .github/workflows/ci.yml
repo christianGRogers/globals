@@ -62,3 +62,17 @@ jobs:
         run: node spikes/run-spike.mjs 02 -- --workers 4 --seconds 3 --increments 20000
       - name: read latency
         run: node spikes/run-spike.mjs 04 -- --iterations 300 --batch 1000 --roundTrips 500
+
+  smoke-soak:
+    name: short soak
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: ninety second soak, four readers
+        run: node packages/core/dist/test/soak/run-soak.js --readers 4 --seconds 90
