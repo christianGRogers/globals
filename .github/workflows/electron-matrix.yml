@@ -1,0 +1,59 @@
+name: electron-matrix
+
+# This library is unusually exposed to Electron internals, so every supported major is
+# exercised on every platform. The buffer sharing spike is the go or no go, and it needs a
+# display, which is why Linux runs it under xvfb.
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - "packages/electron/**"
+      - "spikes/01-share-buffer/**"
+      - ".github/workflows/electron-matrix.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  share-buffer:
+    name: spike 01, electron ${{ matrix.electron }}, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        electron: ["31", "32", "33"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save electron@^${{ matrix.electron }}
+      - name: run the sharing spike
+        if: runner.os != 'Linux'
+        run: node spikes/run-spike.mjs 01
+      - name: run the sharing spike under xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01
+
+  canary:
+    name: spike 01 against the Electron beta
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save electron@beta
+      - name: canary, failure here is a warning not a break
+        run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01

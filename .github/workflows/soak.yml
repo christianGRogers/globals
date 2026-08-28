@@ -1,0 +1,47 @@
+name: soak
+
+# The soak is the release gate for anything that touches the arena or reclamation.
+# It runs nightly and on demand, never on a pull request, because it is slow by design.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Duration in seconds
+        default: "3600"
+      readers:
+        description: Reader count
+        default: "8"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: soak, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: soak
+        run: >
+          node packages/core/dist/test/soak/run-soak.js
+          --readers ${{ inputs.readers || '8' }}
+          --seconds ${{ inputs.seconds || '3600' }}
+          --report soak-results/${{ matrix.os }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-${{ matrix.os }}
+          path: soak-results/

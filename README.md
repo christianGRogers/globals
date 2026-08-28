@@ -60,7 +60,8 @@ npm run build
 npm test
 ```
 
-Branching follows a gitflow variant described in [docs/branching.md](docs/branching.md).
+Continuous integration is described in [docs/ci.md](docs/ci.md). Branching follows a
+gitflow variant described in [docs/branching.md](docs/branching.md).
 Work lands on `dev`. Only a release merge reaches `main`.
 
 ## License
