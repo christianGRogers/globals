@@ -30,7 +30,7 @@
     "gate:docker": "docker build -f docker/gate.Dockerfile -t globals-gate . && docker run --rm --init --ipc=host globals-gate"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.3.0",
     "@types/react": "^19.2.18",
     "electron": "^33.4.11",
     "react": "^19.2.8",
