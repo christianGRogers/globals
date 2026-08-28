@@ -1,0 +1,140 @@
+/**
+ * Spike 01: does one SharedArrayBuffer reach two sandboxed renderers?
+ *
+ * The main process is a broker only. It creates MessageChannelMain pairs and hands one
+ * port to the owner window and one to each UI window. The buffer itself travels renderer
+ * to renderer over those ports and never passes through Node, which is the whole point of
+ * the topology.
+ */
+import { app, BrowserWindow, MessageChannelMain, ipcMain, protocol } from "electron";
+import { fileURLToPath } from "node:url";
+import { dirname, join, normalize } from "node:path";
+import { readFile } from "node:fs/promises";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const SCHEME = "globals-spike";
+const PRELOAD = join(here, "preload.cjs");
+
+// A privileged scheme is required for crossOriginIsolated. Registering it must happen
+// before app ready.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  },
+]);
+
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
+
+function serve() {
+  protocol.handle(SCHEME, async (request) => {
+    const { pathname } = new URL(request.url);
+    const relative = normalize(pathname).replace(/^[/\]+/, "");
+    const file = join(here, relative || "index.html");
+    if (!file.startsWith(here)) return new Response("forbidden", { status: 403 });
+
+    let body;
+    try {
+      body = await readFile(file);
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+    const extension = file.slice(file.lastIndexOf("."));
+    return new Response(body, {
+      headers: {
+        "content-type": MIME[extension] ?? "application/octet-stream",
+        // These two headers are what make crossOriginIsolated true, which is what makes
+        // SharedArrayBuffer transferable between renderers.
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-embedder-policy": "require-corp",
+        "cross-origin-resource-policy": "same-origin",
+      },
+    });
+  });
+}
+
+function createWindow({ page, show, title }) {
+  const window = new BrowserWindow({
+    show,
+    width: 640,
+    height: 420,
+    title,
+    webPreferences: {
+      preload: PRELOAD,
+      // The gate. If the spike only passes with either of these off, the project stops.
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  void window.loadURL(`${SCHEME}://spike/${page}`);
+  return window;
+}
+
+const reports = [];
+let expectedReports = 0;
+
+ipcMain.on("spike:report", (_event, report) => {
+  reports.push(report);
+  console.log(`  ${report.window.padEnd(8)} ${JSON.stringify(report)}`);
+  if (reports.length < expectedReports) return;
+  finish();
+});
+
+function finish() {
+  const owner = reports.find((r) => r.window === "owner");
+  const readers = reports.filter((r) => r.window !== "owner");
+
+  const checks = [
+    { name: "crossOriginIsolated in every window", pass: reports.every((r) => r.crossOriginIsolated) },
+    { name: "sandbox and contextIsolation stayed on", pass: reports.every((r) => r.sandboxed) },
+    { name: "every reader received the buffer", pass: readers.length > 0 && readers.every((r) => r.received) },
+    { name: "readers observed the owner write", pass: readers.every((r) => r.sawOwnerValue) },
+    { name: "owner observed a reader write", pass: owner?.sawReaderValue === true },
+    { name: "grow() was observed by readers", pass: readers.every((r) => r.observedGrowth) },
+  ];
+
+  console.log("");
+  for (const check of checks) {
+    console.log(`${check.pass ? "PASS" : "FAIL"}  ${check.name}`);
+  }
+  const failed = checks.filter((c) => !c.pass);
+  console.log(
+    failed.length === 0
+      ? "\ngate: PASS, the topology is implementable on this Electron version"
+      : `\ngate: FAIL, ${failed.length} check(s) failed, see docs/plan.md off ramps`,
+  );
+  app.exit(failed.length === 0 ? 0 : 1);
+}
+
+await app.whenReady();
+serve();
+
+const owner = createWindow({ page: "owner.html", show: false, title: "owner" });
+const readerWindows = [
+  createWindow({ page: "ui.html?name=ui-a", show: true, title: "ui-a" }),
+  createWindow({ page: "ui.html?name=ui-b", show: true, title: "ui-b" }),
+];
+expectedReports = 1 + readerWindows.length;
+
+await Promise.all(
+  [owner, ...readerWindows].map(
+    (window) => new Promise((resolve) => window.webContents.once("did-finish-load", resolve)),
+  ),
+);
+
+// One port pair per reader. The owner keeps one end of each.
+for (const reader of readerWindows) {
+  const { port1, port2 } = new MessageChannelMain();
+  owner.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
+  reader.webContents.postMessage("spike:port", { peer: "owner" }, [port2]);
+}
+
+setTimeout(() => {
+  if (reports.length < expectedReports) {
+    console.error(`\ngate: FAIL, timed out with ${reports.length} of ${expectedReports} reports`);
+    app.exit(1);
+  }
+}, 20_000);
+
+console.log(`spike 01, Electron ${process.versions.electron}, Chromium ${process.versions.chrome}\n`);

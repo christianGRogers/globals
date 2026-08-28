@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ui</title>
+<body>
+<pre id="log"></pre>
+<script type="module">
+const name = new URLSearchParams(location.search).get("name") ?? "ui";
+const log = (line) => { document.getElementById("log").textContent += line + "\n"; };
+document.title = name;
+
+const OWNER_VALUE = 0;
+const READER_VALUE = 1;
+const GROWN_MARKER = 256;
+
+let sab = null;
+let observedGrowth = false;
+let sawOwnerValue = false;
+
+window.spike.onPort((port) => {
+  port.start();
+  port.addEventListener("message", (event) => {
+    if (event.data.kind === "buffer") {
+      sab = event.data.sab;
+      const i32 = new Int32Array(sab);
+      sawOwnerValue = Atomics.load(i32, OWNER_VALUE) === 0xC0FFEE;
+      log(`received buffer, ${sab.byteLength} bytes, owner value seen: ${sawOwnerValue}`);
+      // Write back so the owner can confirm the sharing is bidirectional, which is also
+      // the fact that makes the arena one trust domain.
+      Atomics.store(i32, READER_VALUE, 0xFACE);
+      port.postMessage({ kind: "wrote" });
+    }
+
+    if (event.data.kind === "grown") {
+      // The critical question: does this renderer see the larger length on a buffer it
+      // already holds, without a new transfer?
+      observedGrowth = sab.byteLength === event.data.byteLength
+        && new Int32Array(sab)[GROWN_MARKER] === 0xBEEF;
+      log(`growth observed: ${observedGrowth}, local length ${sab.byteLength}`);
+
+      window.spike.report({
+        window: name,
+        crossOriginIsolated: self.crossOriginIsolated === true,
+        sandboxed: window.spike.sandboxed,
+        received: sab !== null,
+        sawOwnerValue,
+        sawReaderValue: false,
+        observedGrowth,
+      });
+      port.postMessage({ kind: "done" });
+    }
+  });
+});
+</script>

@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>owner</title>
+<body>
+<pre id="log"></pre>
+<script type="module">
+const log = (line) => { document.getElementById("log").textContent += line + "\n"; };
+
+// Growable so the spike can answer whether grow() is observed by processes that already
+// hold the buffer.
+const sab = new SharedArrayBuffer(1024, { maxByteLength: 4096 });
+
+// Word 0: owner written value. Word 1: reader written value. Word 256: growth marker,
+// only addressable after grow().
+const OWNER_VALUE = 0;
+const READER_VALUE = 1;
+const GROWN_MARKER = 256;
+
+Atomics.store(new Int32Array(sab), OWNER_VALUE, 0xC0FFEE);
+
+const ports = [];
+let sawReaderValue = false;
+let acknowledged = 0;
+
+window.spike.onPort((port) => {
+  port.addEventListener("message", (event) => {
+    if (event.data.kind === "wrote") {
+      const value = Atomics.load(new Int32Array(sab), READER_VALUE);
+      log(`reader wrote 0x${value.toString(16)}`);
+      if (value !== 0) sawReaderValue = true;
+    }
+
+    if (event.data.kind === "done") {
+      acknowledged += 1;
+      if (acknowledged !== ports.length) return;
+      window.spike.report({
+        window: "owner",
+        crossOriginIsolated: self.crossOriginIsolated === true,
+        sandboxed: window.spike.sandboxed,
+        received: true,
+        sawOwnerValue: true,
+        sawReaderValue,
+        observedGrowth: sab.byteLength === 4096,
+      });
+    }
+  });
+
+  port.start();
+  ports.push(port);
+  port.postMessage({ kind: "buffer", sab });
+  log(`handed the buffer to peer ${ports.length}`);
+
+  if (ports.length === 2) {
+    // Grow only after both peers hold the buffer. If growth is not observed, the design
+    // fixes arena size at bootstrap and needs a rehandshake path instead.
+    setTimeout(() => {
+      sab.grow(4096);
+      new Int32Array(sab)[GROWN_MARKER] = 0xBEEF;
+      log(`grew to ${sab.byteLength} bytes`);
+      for (const peer of ports) peer.postMessage({ kind: "grown", byteLength: sab.byteLength });
+    }, 200);
+  }
+});
+</script>
