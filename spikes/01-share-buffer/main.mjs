@@ -9,7 +9,7 @@
 import { app, BrowserWindow, MessageChannelMain, ipcMain, protocol } from "electron";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize } from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCHEME = "globals-spike";
@@ -29,8 +29,10 @@ const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css
 function serve() {
   protocol.handle(SCHEME, async (request) => {
     const { pathname } = new URL(request.url);
-    const relative = normalize(pathname).replace(/^[/\]+/, "");
-    const file = join(here, relative || "index.html");
+    const segments = decodeURIComponent(pathname)
+      .split("/")
+      .filter((segment) => segment.length > 0 && segment !== ".");
+    const file = normalize(join(here, ...segments)) || join(here, "index.html");
     if (!file.startsWith(here)) return new Response("forbidden", { status: 403 });
 
     let body;
@@ -78,8 +80,40 @@ ipcMain.on("spike:report", (_event, report) => {
   reports.push(report);
   console.log(`  ${report.window.padEnd(8)} ${JSON.stringify(report)}`);
   if (reports.length < expectedReports) return;
+  clearTimeout(watchdog);
   finish();
 });
+
+// On Windows an Electron main process is a GUI subsystem binary, so its console output does
+// not reach the parent pipe. The verdict is written to a file and the runner prints it, which
+// behaves the same on every platform and in continuous integration.
+const reportPath =
+  process.argv.find((argument) => argument.startsWith("--report="))?.slice("--report=".length) ??
+  join(here, "spike01-result.json");
+
+async function writeReport(checks, verdict) {
+  try {
+    await writeFile(
+      reportPath,
+      JSON.stringify(
+        {
+          electron: process.versions.electron,
+          chromium: process.versions.chrome,
+          platform: process.platform,
+          arch: process.arch,
+          at: new Date().toISOString(),
+          reports,
+          checks,
+          verdict,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (error) {
+    console.error(`could not write the spike report: ${error.message}`);
+  }
+}
 
 function finish() {
   const owner = reports.find((r) => r.window === "owner");
@@ -104,11 +138,28 @@ function finish() {
       ? "\ngate: PASS, the topology is implementable on this Electron version"
       : `\ngate: FAIL, ${failed.length} check(s) failed, see docs/plan.md off ramps`,
   );
-  app.exit(failed.length === 0 ? 0 : 1);
+  void writeReport(checks, failed.length === 0 ? "PASS" : "FAIL").then(() =>
+    app.exit(failed.length === 0 ? 0 : 1),
+  );
 }
 
 await app.whenReady();
 serve();
+
+// The watchdog is armed before anything can block, because the failure this spike most
+// needs to report is a window that never finishes loading. Arming it after the load would
+// mean that failure produces no verdict at all, which is what happened the first time.
+const loadFailures = [];
+const watchdog = setTimeout(() => {
+  const detail =
+    loadFailures.length > 0
+      ? loadFailures.join("; ")
+      : `${reports.length} of ${expectedReports || 3} windows reported`;
+  console.error(`\ngate: FAIL, timed out. ${detail}`);
+  void writeReport([{ name: "every window loaded and reported", pass: false, detail }], "FAIL").then(
+    () => app.exit(1),
+  );
+}, 20_000);
 
 const owner = createWindow({ page: "owner.html", show: false, title: "owner" });
 const readerWindows = [
@@ -119,22 +170,31 @@ expectedReports = 1 + readerWindows.length;
 
 await Promise.all(
   [owner, ...readerWindows].map(
-    (window) => new Promise((resolve) => window.webContents.once("did-finish-load", resolve)),
+    (window) =>
+      new Promise((resolve) => {
+        window.webContents.once("did-finish-load", () => resolve());
+        window.webContents.once("did-fail-load", (_event, code, description, url) => {
+          loadFailures.push(`${window.getTitle()} failed to load ${url}: ${description} (${code})`);
+          resolve();
+        });
+      }),
   ),
 );
 
-// One port pair per reader. The owner keeps one end of each.
-for (const reader of readerWindows) {
-  const { port1, port2 } = new MessageChannelMain();
-  owner.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
-  reader.webContents.postMessage("spike:port", { peer: "owner" }, [port2]);
-}
-
-setTimeout(() => {
-  if (reports.length < expectedReports) {
-    console.error(`\ngate: FAIL, timed out with ${reports.length} of ${expectedReports} reports`);
-    app.exit(1);
+if (loadFailures.length > 0) {
+  clearTimeout(watchdog);
+  console.error(`\ngate: FAIL, ${loadFailures.join("; ")}`);
+  void writeReport(
+    loadFailures.map((detail) => ({ name: "window loaded", pass: false, detail })),
+    "FAIL",
+  ).then(() => app.exit(1));
+} else {
+  // One port pair per reader. The owner keeps one end of each.
+  for (const reader of readerWindows) {
+    const { port1, port2 } = new MessageChannelMain();
+    owner.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
+    reader.webContents.postMessage("spike:port", { peer: "owner" }, [port2]);
   }
-}, 20_000);
+}
 
 console.log(`spike 01, Electron ${process.versions.electron}, Chromium ${process.versions.chrome}\n`);

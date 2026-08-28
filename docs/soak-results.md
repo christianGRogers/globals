@@ -104,6 +104,54 @@ Reading of this result:
 - Zero stale snapshots this time. Reads are slower now that each one walks a whole structure,
   so readers acquire less often and never fall past the retention cap.
 
+## Phase 3 chaos run
+
+The chaos harness opens, reloads, freezes, and kills simulated windows while the writer runs
+at full rate. Killing a window without a detach is the case that matters: it leaves a claimed
+reader slot with a pinned epoch, and nothing in the arena notices on its own.
+
+```
+chaos: 8 windows over 12 slots, 90s
+
+  duration            90.9s
+  commits             2354002
+  reads               1766079
+  windows opened      153
+  reloaded            185
+  closed              56
+  killed mid read     89
+  frozen              118
+  slots reaped        105
+  slot exhaustions    0
+  inconsistent reads  0
+  corruptions         0
+  stale snapshots     1001
+  claimed slots left  0
+  minimum pinned      0
+  live bytes          4048
+  stranded bytes      0
+
+gate: PASS, no leaked slot, no stuck epoch, no incorrect read
+```
+
+Reading of this result:
+
+- 89 windows were killed mid read across 12 slots. Every slot they abandoned was reclaimed:
+  none was still claimed at the end, and nothing was still pinned.
+- 1001 stale snapshots. Expected and correct. A frozen window keeps a snapshot while the
+  writer runs past the retention cap, and the next decode tells it so rather than handing it
+  freed memory. That number is the fail closed path being exercised roughly a thousand times.
+- Live bytes settled at 4048 despite 105 reaps, so a reaped reader releases exactly what it
+  was holding.
+- Zero slot exhaustions, with 8 windows churning over 12 slots. The reaper kept up with the
+  churn, which is the property that decides whether a real application can open windows
+  faster than it closes them.
+
+What this does not cover is the Electron handshake itself: real renderer processes, the
+custom protocol, and cross origin isolation. That half is
+`packages/electron/test/chaos-app`, run by the electron-matrix workflow, and it has not yet
+been run. See [../spikes/RESULTS.md](../spikes/RESULTS.md).
+
 ## The bug this run exists to prove is gone
 
 An earlier 12 second run reported 2 inconsistent reads in 4.17 million. Forced reclamation

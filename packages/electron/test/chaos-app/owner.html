@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>chaos owner</title>
+<body>
+<pre id="log"></pre>
+<script type="module">
+import { startOwner } from "../../dist/src/index.js";
+
+const log = (line) => { document.getElementById("log").textContent += line + "\n"; };
+
+const runtime = startOwner({
+  initial: {
+    version: 0,
+    tick: 0,
+    rows: Array.from({ length: 200 }, (_u, i) => ({ id: i, v: 0 })),
+    observations: {},
+  },
+  operations: {
+    observe(draft, payload) {
+      draft.observations[payload.id] = payload;
+    },
+  },
+  arena: { byteLength: 1 << 20, maxByteLength: 1 << 24, maxReaders: 32, retainedVersions: 32 },
+  liveness: { intervalMs: 250, missesBeforeDead: 4 },
+});
+
+// The writer runs continuously, so every reload and every kill happens against a moving
+// target rather than a quiet arena.
+let tick = 0;
+setInterval(() => {
+  tick += 1;
+  runtime.update((draft) => {
+    draft.version = tick;
+    draft.tick = tick;
+    const row = draft.rows[tick % draft.rows.length];
+    if (row) row.v = tick;
+  });
+  if (tick % 200 === 0) log(`tick ${tick}, peers ${runtime.stats().peers}, reaped ${runtime.stats().reaped}`);
+}, 4);
+</script>

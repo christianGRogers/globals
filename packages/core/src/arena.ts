@@ -182,6 +182,11 @@ export class SharedArena {
     this.#refreshIfGrown();
   }
 
+  /** Bumped when a new owner adopts the buffer. A reader uses it to fail closed. */
+  get ownerGeneration(): number {
+    return Atomics.load(this.#i32, Header.OwnerGeneration);
+  }
+
   writeConfigChecksum(): void {
     const words = this.words;
     words[Header.ConfigChecksum] = this.#configChecksum(words);

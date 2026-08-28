@@ -42,6 +42,38 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01
 
+  chaos:
+    name: window lifecycle chaos, electron ${{ matrix.electron }}, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        electron: ["33"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm install --no-save electron@^${{ matrix.electron }}
+      - name: chaos, real windows opened, reloaded, and crashed
+        if: runner.os != 'Linux'
+        run: npx electron packages/electron/test/chaos-app/main.mjs --seconds 120
+      - name: chaos under xvfb
+        if: runner.os == 'Linux'
+        run: >
+          xvfb-run --auto-servernum
+          npx electron packages/electron/test/chaos-app/main.mjs --seconds 120
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chaos-${{ matrix.os }}-electron${{ matrix.electron }}
+          path: packages/electron/test/chaos-app/chaos-result.json
+
   canary:
     name: spike 01 against the Electron beta
     runs-on: ubuntu-latest

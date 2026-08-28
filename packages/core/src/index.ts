@@ -21,6 +21,8 @@ export { ArenaOwner } from "./owner.js";
 export type { OwnerOptions, OwnerStats } from "./owner.js";
 export { ArenaReader, Snapshot } from "./reader.js";
 export type { ReaderOptions, SnapshotInfo } from "./reader.js";
+export { LivenessMonitor } from "./liveness.js";
+export type { LivenessOptions } from "./liveness.js";
 export { OwnerStore, ReaderStore } from "./store.js";
 export type { ReadableStore, WritableStore } from "./store.js";
 export { ReaderTable } from "./readers.js";

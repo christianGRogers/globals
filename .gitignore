@@ -14,3 +14,5 @@ npm-debug.log*
 !.vscode/extensions.json
 bench-results/
 soak-results/*.json
+spikes/*/spike01-result.json
+packages/electron/test/chaos-app/chaos-result.json

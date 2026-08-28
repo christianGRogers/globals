@@ -24,6 +24,14 @@ All notable changes to this project are recorded here. The format follows
   plus `snapshot.get(path)` and `snapshot.toJSON()`.
 - `OwnerStore` and `ReaderStore`, which separate reading from writing in the type system.
 - `ExternalTier`, the asynchronous escape hatch for values the ladder cannot encode.
+- `@globals/electron`: the hidden owner window, a privileged custom scheme that sets COOP
+  and COEP on every response, the port handshake, named write operations, the per window
+  shared or asynchronous tier split, and an asynchronous main process API.
+- `LivenessMonitor` in the core, which reaps the reader slot a crashed or frozen window
+  left claimed and pinned.
+- Persistence with debounced writes and temp file plus rename discipline.
+- A chaos harness that opens, reloads, freezes, and kills simulated windows while a writer
+  runs, plus its Electron counterpart for the electron-matrix workflow.
 
 ### Fixed
 
