@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+npm-debug.log*
+.env
+.env.local
+.idea/
+.vscode/*
+!.vscode/extensions.json
+bench-results/
+soak-results/

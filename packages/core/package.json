@@ -1,0 +1,23 @@
+{
+  "name": "@globals/core",
+  "version": "0.1.0",
+  "description": "Runtime agnostic shared memory arena: tagged value encoding, persistent data structures, epoch based reclamation.",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": ["dist/src", "README.md"],
+  "engines": { "node": ">=20.11.0" },
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianGRogers/globals.git",
+    "directory": "packages/core"
+  }
+}

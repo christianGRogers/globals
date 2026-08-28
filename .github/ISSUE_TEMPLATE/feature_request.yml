@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a change to the library
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you cannot do today. Describe the situation, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Effect on the contract
+      description: >
+        Does this keep reads synchronous and writes asynchronous? A proposal that moves
+        work onto the read path needs a strong argument.
+    validations:
+      required: true

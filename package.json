@@ -1,0 +1,33 @@
+{
+  "name": "globals-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Synchronous reads of shared application state across Electron processes.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "tsc --build tsconfig.build.json --clean",
+    "typecheck": "tsc --build tsconfig.build.json --pretty",
+    "test": "npm run build && node --test packages/*/dist/test/**/*.test.js",
+    "test:core": "npm run build && node --test packages/core/dist/test/**/*.test.js",
+    "soak": "npm run build && node packages/core/dist/test/soak/run-soak.js",
+    "bench": "npm run build && node benchmarks/dist/read-latency.js",
+    "lint": "npm run typecheck && node scripts/check-docs.mjs",
+    "spike": "node spikes/run-spike.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianGRogers/globals.git"
+  }
+}

@@ -1,0 +1,44 @@
+name: Bug report
+description: A defect in the library
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, confirm the behaviour is not the documented contract. Reads are
+        synchronous and writes are asynchronous, so a read immediately after a write
+        returning the old value is correct behaviour, not a bug.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Library version, Electron version, Node version, operating system and architecture
+      placeholder: "@globals/core 0.1.0, Electron 33.2.0, Node 20.18.0, macOS 15 arm64"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A repository or a single file that fails. Reports without one are usually closed.
+    validations:
+      required: true
+  - type: checkboxes
+    id: sandbox
+    attributes:
+      label: Configuration
+      options:
+        - label: "`sandbox: true` and `contextIsolation: true` are enabled"
+        - label: "`crossOriginIsolated` is true in the affected window"
