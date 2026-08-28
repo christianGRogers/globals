@@ -117,12 +117,13 @@ Read in this order.
 | Path | Contents |
 | --- | --- |
 | `packages/core` | Runtime agnostic arena, encoding, persistent structures, reclamation |
-| `packages/electron` | Owner window, bootstrap handshake, lifecycle, main process API |
+| `packages/shm` | The native transport: one mapped region, an owning writer, seqlock-consistent reader copies |
+| `packages/electron` | The native transport integration: main process owner, preload readers, async tier |
 | `packages/react` | The `useSyncExternalStore` binding |
 | `packages/vue` | Vue adapter over the same subscribe and snapshot pair |
 | `packages/svelte` | Svelte store adapter |
 | `spikes` | Phase 0 feasibility spikes, throwaway by design |
-| `examples` | A four window application over five thousand shared rows |
+| `examples` | The three window example over the native transport, two tiers |
 | `benchmarks` | The reproducible harness behind the numbers in the docs |
 | `docs` | Contract, trust model, architecture, and the rest |
 
@@ -144,7 +145,7 @@ integration on this machine:
 ```bash
 npm run gate         # spike 01, the go or no go for the whole project
 npm run gate:chaos   # window lifecycle chaos, with real renderer processes
-npm run gate:example # the four window example application
+npm run gate:example # the three window example application
 ```
 
 What each verdict means is in [spikes/README.md](spikes/README.md).

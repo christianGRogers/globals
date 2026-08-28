@@ -1,5 +1,14 @@
 # Electron integration
 
+> **This page describes the removed window.open integration and awaits its rewrite.**
+> [ADR 0003](adr/0003-native-transport.md) replaced the topology below with the native
+> transport: the owner lives in the main process, trusted windows map the region from their
+> preloads, and sandboxed windows use the asynchronous tier. Until the rewrite lands
+> ([plan-native.md](plan-native.md), N4), the current API is documented in
+> [the package README](../packages/electron/README.md) and demonstrated by
+> [the example application](../examples/native-multi-window/README.md). The body below is
+> kept as the record of the design the gate closed.
+
 Three processes, three entry points, and one handshake. This page is what an application
 author needs; the reasoning behind the topology is in
 [architecture.md](architecture.md) and [ADR 0001](adr/0001-hidden-owner-window.md).

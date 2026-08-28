@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stats, async tier</title>
+<style>
+  body { font: 13px/1.5 system-ui, sans-serif; margin: 1rem; }
+  h1 { font-size: 1rem; }
+  em { color: #666; }
+  dt { color: #666; margin-top: 0.6rem; }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+</style>
+<body>
+<h1>stats <em>sandbox kept, reads by asking</em></h1>
+<dl>
+  <dt>tier</dt><dd id="tier"></dd>
+  <dt>version</dt><dd id="version"></dd>
+  <dt>edits</dt><dd id="edits"></dd>
+  <dt>sum of values</dt><dd id="sum"></dd>
+</dl>
+<script>
+  // This window never maps the region. Everything it knows arrived by request, which is
+  // the visible difference between the tiers: there is no synchronous get to call.
+  document.getElementById("tier").textContent = window.globalsAsync.tier;
+  const refresh = async () => {
+    const { version, value } = await window.globalsAsync.read();
+    document.getElementById("version").textContent = String(version);
+    document.getElementById("edits").textContent = String(value.commitCount);
+    document.getElementById("sum").textContent = String(
+      value.rows.reduce((sum, row) => sum + row.value, 0),
+    );
+  };
+  window.globalsAsync.subscribe(() => void refresh());
+  void refresh();
+</script>

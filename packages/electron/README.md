@@ -1,49 +1,58 @@
 # @globals/electron
 
-The Electron integration for [Globals](https://github.com/christianGRogers/globals): a hidden
-owner window that owns the arena, a bootstrap handshake that hands each window its buffer
-before the first render, window lifecycle handling, and persistence.
+The Electron integration for [Globals](https://github.com/christianGRogers/globals) over the
+native transport ([ADR 0003](../../docs/adr/0003-native-transport.md)): the owner is a plain
+object in the main process, trusted windows map one shared memory region from their preloads
+and read synchronously, and windows that keep their sandbox get the asynchronous tier.
+
+The trade, first: **a window that maps the region runs with `sandbox: false`.** Context
+isolation stays on and the page gets no Node access, but the Chromium OS sandbox for that
+renderer is off. A window that must keep its sandbox uses the asynchronous tier and never
+maps anything.
+
+## Main process
+
+```ts
+import { startNativeOwner } from "@globals/electron";
+
+const owner = await startNativeOwner({
+  initial: { count: 0, rows: [] },
+  operations: {
+    increment(draft, payload: { by: number }) {
+      draft.count += payload.by;
+    },
+  },
+  persistence: {}, // optional: rehydrate on boot, save commits under userData
+});
+
+owner.store.get();                 // the owner reads its own store synchronously
+await owner.update((draft) => …);  // or writes it directly
+```
+
+## A trusted window's preload, with `sandbox: false`
+
+```ts
+import { connectNative } from "@globals/electron/preload";
+
+const store = await connectNative();
+store.get();                        // synchronous, never stale, never torn
+store.select(["rows", 3, "name"]);
+await store.dispatch("increment", { by: 1 });
+```
+
+Expose whole operations to the page through `contextBridge`, not per-property reads: a
+bridge crossing costs about a microsecond, so the decode layer belongs on the preload side.
+The [example application](../../examples/native-multi-window) shows the shape.
+
+## A sandboxed window
+
+```ts
+// main process
+import { asyncPreloadPath } from "@globals/electron";
+new BrowserWindow({ webPreferences: { preload: asyncPreloadPath(), sandbox: true } });
+```
+
+The page receives `window.globalsAsync`: `read(path?)`, `dispatch(operation, payload)`, and
+`subscribe(listener)`. There is no synchronous `get` on this tier, deliberately.
 
 Full guide: [docs/electron.md](../../docs/electron.md).
-
-## Three entry points
-
-```ts
-// Main process, at module scope
-import { prepare } from "@globals/electron";
-prepare();
-
-// Main process, after app ready
-import { GlobalsHost, preloadPath } from "@globals/electron";
-const host = await GlobalsHost.start({ root, ownerPage: "owner.html" });
-host.attach(window, { name: "main-window" });
-
-// Hidden owner window
-import { startOwner } from "@globals/electron";
-const runtime = startOwner({ initial, operations });
-
-// Any UI window
-import { connect } from "@globals/electron/renderer";
-const store = await connect();
-store.get();  // synchronous
-```
-
-## Requirements
-
-- Electron 28 or newer, for ES modules in the main process.
-- `sandbox: true` and `contextIsolation: true`. The design is built for them, not despite
-  them.
-- The application served over the custom protocol, so every response carries COOP and COEP.
-  Cross origin isolation is what makes `SharedArrayBuffer` transferable, and it cannot be set
-  on `file://`.
-
-## The trust boundary
-
-Every window that maps the arena can write to it. Give any window rendering content you do
-not control the asynchronous tier:
-
-```ts
-startOwner({ asyncOnly: (name) => name.startsWith("untrusted-") });
-```
-
-Read [docs/trust-model.md](../../docs/trust-model.md) before adopting this.
