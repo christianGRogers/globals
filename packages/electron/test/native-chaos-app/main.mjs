@@ -39,7 +39,7 @@ const windowCount = Number(values.windows);
 
 const regionPath = join(app.getPath("temp"), `globals-native-chaos-${process.pid}.region`);
 const rendererLog = [];
-const events = { reloads: 0, crashes: 0, recreations: 0, rendererGone: 0 };
+const events = { reloads: 0, crashes: 0, recreations: 0, rendererGone: 0, heals: 0 };
 // Latest stats per window boot: a reload or recreation starts a new boot, and keeping every
 // boot's last report means a violation seen by a window that later died still fails the run.
 const statsByBoot = new Map();
@@ -134,19 +134,21 @@ async function main() {
   const names = Array.from({ length: windowCount }, (_u, i) => `chaos-${i}`);
   const windows = new Map(names.map((name) => [name, makeWindow(name)]));
 
-  // The healing sweep, keyed on report liveness rather than isCrashed(): Linux does not
-  // always register a forced crash, so a dead window can look healthy to every renderer
-  // state API while saying nothing. A window that has not reported for a while gets
-  // reloaded, whatever the platform thinks happened to it, and the verdict then measures
-  // recovery rather than scheduling luck.
+  // The healing sweep, keyed on report liveness rather than renderer state: Linux does not
+  // reliably register a forced crash, so a dead window can look healthy to every renderer
+  // API while saying nothing, and Linux also taught that reload() does not always revive a
+  // wedged window. A window silent past its interval is destroyed and recreated, which is
+  // the strongest recovery path an application has, and the verdict then measures recovery
+  // rather than scheduling luck.
   const sweepStart = Date.now();
   const sweep = setInterval(() => {
     for (const [name, window] of windows) {
-      if (window.isDestroyed()) continue;
       const seen = lastReportAt.get(name) ?? sweepStart;
       if (Date.now() - seen > 2500) {
         lastReportAt.set(name, Date.now());
-        window.webContents.reload();
+        events.heals += 1;
+        if (!window.isDestroyed()) window.destroy();
+        windows.set(name, makeWindow(name));
       }
     }
   }, 1000);
