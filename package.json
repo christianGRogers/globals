@@ -22,7 +22,7 @@
     "spike": "node spikes/run-spike.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.3.0",
     "typescript": "^5.9.0"
   },
   "license": "MIT",
