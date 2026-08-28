@@ -32,9 +32,9 @@
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
-    "node-gyp": "^11.0.0",
     "@types/react": "^19.2.18",
     "electron": "^33.4.11",
+    "node-gyp": "^12.4.0",
     "react": "^19.2.8",
     "svelte": "^5.56.10",
     "typescript": "^7.0.2",

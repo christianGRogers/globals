@@ -28,6 +28,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <unistd.h>
 #endif
 
@@ -400,6 +401,16 @@ static napi_value Sync(napi_env env, napi_callback_info info) {
   }
 
   for (uint32_t attempts = 0; attempts < SYNC_RETRY_CAP; attempts++) {
+    // A reader that spins without yielding can starve the very writer it is waiting on
+    // when cores are scarce, which converts contention into livelock. Give the scheduler
+    // a chance regularly; the fast path never reaches this.
+    if (attempts != 0 && (attempts & 1023) == 0) {
+#ifdef _WIN32
+      SwitchToThread();
+#else
+      sched_yield();
+#endif
+    }
     uint32_t s1 = load_seq(r);
     if (s1 & 1) continue;
     memcpy(dest, (const void*)DATA_PTR(r), r->data_size);

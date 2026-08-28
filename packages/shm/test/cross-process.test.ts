@@ -18,6 +18,10 @@ const helper = (name: string) =>
   fileURLToPath(new URL(`../../test/helpers/${name}`, import.meta.url));
 
 const SIZE = 256 * 1024;
+// The fast-suite torture runs on two-core CI runners where a large copy barely fits the
+// writer's stable window. This size keeps the collision pressure real and the runtime
+// bounded; the nightly soak is where the big regions get tortured.
+const TORTURE_SIZE = 64 * 1024;
 
 test("a commit flushed here is read intact by a child process", async () => {
   const path = join(dir, "parent-owns.mem");
@@ -39,7 +43,7 @@ test("a commit flushed here is read intact by a child process", async () => {
 test("a child writer at full rate never shows this process a torn commit", async () => {
   const path = join(dir, "child-owns.mem");
   const durationMs = 1500;
-  const writer = run(process.execPath, [helper("writer-child.mjs"), path, String(SIZE), String(durationMs)], {
+  const writer = run(process.execPath, [helper("writer-child.mjs"), path, String(TORTURE_SIZE), String(durationMs)], {
     timeout: 30_000,
   });
 
@@ -58,7 +62,7 @@ test("a child writer at full rate never shows this process a torn commit", async
   }
   assert.ok(reader, "could not attach to the child's region in time");
 
-  const dest = new Uint8Array(SIZE);
+  const dest = new Uint8Array(reader.dataSize);
   let reads = 0;
   let torn = 0;
   let lastVersion = 0;
@@ -70,7 +74,7 @@ test("a child writer at full rate never shows this process a torn commit", async
     if (version < lastVersion) regressions++;
     lastVersion = version;
     const first = dest[0];
-    for (let i = 1; i < SIZE; i++) {
+    for (let i = 1; i < dest.length; i++) {
       if (dest[i] !== first) {
         torn++;
         break;
