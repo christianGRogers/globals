@@ -30,14 +30,25 @@ interface NativeAddon {
 const require_ = createRequire(import.meta.url);
 
 function loadAddon(): NativeAddon {
-  try {
-    return require_("../../native/build/Release/globals_shm.node") as NativeAddon;
-  } catch (cause) {
-    throw new Error(
-      "the @globals/shm native addon is not built for this platform. Run: npm run build:native",
-      { cause },
-    );
+  // A shipped package carries prebuilds per platform and architecture; a working tree
+  // carries whatever node-gyp last built. The prebuild wins so that installing never
+  // needs a toolchain, and the local build remains the fallback for development.
+  const candidates = [
+    `../../native/prebuilds/${process.platform}-${process.arch}/globals_shm.node`,
+    "../../native/build/Release/globals_shm.node",
+  ];
+  let cause: unknown;
+  for (const candidate of candidates) {
+    try {
+      return require_(candidate) as NativeAddon;
+    } catch (error) {
+      cause = error;
+    }
   }
+  throw new Error(
+    `the @globals/shm native addon is not available for ${process.platform}-${process.arch}. Run: npm run build:native`,
+    { cause },
+  );
 }
 
 const addon = loadAddon();
