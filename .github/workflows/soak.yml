@@ -54,7 +54,7 @@ jobs:
           --iterations 20000
           --seed ${{ github.run_number }}
           --report soak-results/fuzz-${{ matrix.os }}.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: soak-${{ matrix.os }}
