@@ -62,7 +62,7 @@ in [docs/benchmarks.md](docs/benchmarks.md).
 | `spikes` | Phase 0 feasibility spikes, throwaway by design |
 | `examples` | A four window application over five thousand shared rows |
 | `benchmarks` | The reproducible harness behind the numbers in the docs |
-| `docs` | Contract, architecture, trust model, object layer, reclamation, Electron, bindings, decision records |
+| `docs` | Contract, architecture, trust model, hardening, object layer, reclamation, Electron, bindings, decision records |
 
 ## Development
 

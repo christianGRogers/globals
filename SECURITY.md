@@ -13,7 +13,9 @@ is writable by every process that holds it, so the arena is a single trust domai
 window that can map the arena can corrupt the state that every other window reads.
 
 The full analysis, including what the design does and does not mitigate, is in
-[docs/trust-model.md](docs/trust-model.md).
+[docs/trust-model.md](docs/trust-model.md). The security note a reviewer should read first is
+the opening section of [docs/hardening.md](docs/hardening.md), which also lists what is still
+outstanding.
 
 ## In scope
 
@@ -21,6 +23,9 @@ The full analysis, including what the design does and does not mitigate, is in
 - A reclamation bug that lets a reader observe freed or recycled memory as valid state.
 - A bootstrap path that hands the buffer to a window that opted out of the shared tier.
 - A checksum verification that can be defeated by a writer inside the arena.
+- A way to consume the arena permanently through writes that are refused. One such vector
+  existed and was closed: a rejected write used to leave the strings it had interned behind,
+  and interned strings are never freed during normal operation.
 
 ## Out of scope
 

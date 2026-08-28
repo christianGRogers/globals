@@ -147,6 +147,27 @@ function readKind(arena: SharedArena, node: number): number {
   return kind;
 }
 
+/**
+ * The entry count of a collision node, validated against the block that holds it.
+ *
+ * The bitmap node has always had this check through its popcount, which cannot exceed 32. The
+ * collision node stores its count as a plain integer, and nothing validated it, so a corrupt
+ * value sent every walker off to visit two billion entries. The loops that consume it have no
+ * budget check inside them, so this is where it has to be caught.
+ */
+function collisionCount(arena: SharedArena, node: number): number {
+  const byteSize = arena.checkBlock(node, "hamt collision node");
+  const count = arena.words[node / WORD + MAP_A] as number;
+  if (count < 0 || (HEADER_WORDS + count * ENTRY_WORDS) * WORD > byteSize) {
+    throw new ArenaCorruptError(
+      `hamt collision node at ${node} claims ${count} entries, which does not fit in ` +
+        `${byteSize} bytes`,
+      { offset: node, actual: count },
+    );
+  }
+  return count;
+}
+
 function bitmapLayout(
   arena: SharedArena,
   node: number,
@@ -207,7 +228,7 @@ export function hamtGet(arena: SharedArena, node: number, key: Slot, hash: numbe
 
     if (kind === HAMT_COLLISION) {
       const base = current / WORD;
-      const count = arena.words[base + MAP_A] as number;
+      const count = collisionCount(arena, current);
       for (let i = 0; i < count; i += 1) {
         const at = dataIndex(base, i);
         const candidate: Slot = {
@@ -340,7 +361,7 @@ export function hamtAssoc(
 
   if (kind === HAMT_COLLISION) {
     const base = node / WORD;
-    const count = arena.words[base + MAP_A] as number;
+    const count = collisionCount(arena, node);
     const storedHash = arena.words[base + MAP_B] as number;
     let existing = -1;
     for (let i = 0; i < count; i += 1) {
@@ -498,7 +519,7 @@ export function hamtDissoc(
 
   if (kind === HAMT_COLLISION) {
     const base = node / WORD;
-    const count = arena.words[base + MAP_A] as number;
+    const count = collisionCount(arena, node);
     const storedHash = arena.words[base + MAP_B] as number;
     let existing = -1;
     for (let i = 0; i < count; i += 1) {
@@ -585,14 +606,53 @@ export interface HamtEntry {
   readonly value: Slot;
 }
 
+/**
+ * The deepest a correct trie can be.
+ *
+ * Seven levels of five bits covers a 32 bit hash, plus one for a collision node. A traversal
+ * that goes deeper is walking a cycle, which a corrupt child pointer can create.
+ */
+const MAX_DEPTH = 8;
+
+/**
+ * The most entries a traversal will visit before giving up.
+ *
+ * A depth bound alone is not enough, and this is the part that is easy to get wrong. Eight
+ * levels with thirty two children each is 32 to the eighth, about a trillion visits, so a
+ * corrupt trie that fans out and points back at itself stays inside the depth bound and still
+ * exhausts the heap. The fuzzer found this by running the process out of memory after ten
+ * minutes rather than by throwing.
+ *
+ * An entry occupies four words inside a node, so a buffer cannot hold more than its length
+ * divided by sixteen of them however it is arranged.
+ */
+function traversalBudget(arena: SharedArena): number {
+  return Math.ceil(arena.byteLength / 16);
+}
+
 /** Every entry in the subtree. Order is the trie order, which is stable for a given set. */
-export function hamtEntries(arena: SharedArena, node: number, out: HamtEntry[] = []): HamtEntry[] {
+export function hamtEntries(
+  arena: SharedArena,
+  node: number,
+  out: HamtEntry[] = [],
+  depth = 0,
+  budget = traversalBudget(arena),
+): HamtEntry[] {
   if (node === EMPTY_NODE) return out;
+  if (depth > MAX_DEPTH) {
+    throw new ArenaCorruptError(`hamt traversal exceeded ${MAX_DEPTH} levels`, { offset: node });
+  }
+  if (out.length > budget) {
+    throw new ArenaCorruptError(
+      `hamt traversal exceeded ${budget} entries, which is more than the buffer can hold`,
+      { offset: node },
+    );
+  }
   const kind = readKind(arena, node);
   const base = node / WORD;
 
   if (kind === HAMT_COLLISION) {
-    const count = arena.words[base + MAP_A] as number;
+    const count = collisionCount(arena, node);
     for (let i = 0; i < count; i += 1) {
       const at = dataIndex(base, i);
       out.push({
@@ -612,33 +672,63 @@ export function hamtEntries(arena: SharedArena, node: number, out: HamtEntry[] =
     });
   }
   for (let i = 0; i < nodeCount; i += 1) {
-    hamtEntries(arena, arena.words[childIndex(base, dataCount, i)] as number, out);
+    hamtEntries(
+      arena,
+      arena.words[childIndex(base, dataCount, i)] as number,
+      out,
+      depth + 1,
+      budget,
+    );
   }
   return out;
 }
 
-export function hamtSize(arena: SharedArena, node: number): number {
+export function hamtSize(arena: SharedArena, node: number, depth = 0): number {
   if (node === EMPTY_NODE) return 0;
+  if (depth > MAX_DEPTH) {
+    throw new ArenaCorruptError(`hamt traversal exceeded ${MAX_DEPTH} levels`, { offset: node });
+  }
   const kind = readKind(arena, node);
   const base = node / WORD;
-  if (kind === HAMT_COLLISION) return arena.words[base + MAP_A] as number;
+  if (kind === HAMT_COLLISION) return collisionCount(arena, node);
   const { dataCount, nodeCount } = bitmapLayout(arena, node);
   let total = dataCount;
   for (let i = 0; i < nodeCount; i += 1) {
-    total += hamtSize(arena, arena.words[childIndex(base, dataCount, i)] as number);
+    total += hamtSize(arena, arena.words[childIndex(base, dataCount, i)] as number, depth + 1);
   }
   return total;
 }
 
 /** Every node in the subtree, for retiring a whole structure the writer is discarding. */
-export function hamtNodes(arena: SharedArena, node: number, out: number[] = []): number[] {
+export function hamtNodes(
+  arena: SharedArena,
+  node: number,
+  out: number[] = [],
+  depth = 0,
+  budget = traversalBudget(arena),
+): number[] {
   if (node === EMPTY_NODE) return out;
+  if (depth > MAX_DEPTH) {
+    throw new ArenaCorruptError(`hamt traversal exceeded ${MAX_DEPTH} levels`, { offset: node });
+  }
+  if (out.length > budget) {
+    throw new ArenaCorruptError(
+      `hamt traversal exceeded ${budget} nodes, which is more than the buffer can hold`,
+      { offset: node },
+    );
+  }
   out.push(node);
   if (readKind(arena, node) === HAMT_COLLISION) return out;
   const base = node / WORD;
   const { dataCount, nodeCount } = bitmapLayout(arena, node);
   for (let i = 0; i < nodeCount; i += 1) {
-    hamtNodes(arena, arena.words[childIndex(base, dataCount, i)] as number, out);
+    hamtNodes(
+      arena,
+      arena.words[childIndex(base, dataCount, i)] as number,
+      out,
+      depth + 1,
+      budget,
+    );
   }
   return out;
 }
@@ -676,7 +766,7 @@ export function hamtGetString(
     const base = current / WORD;
 
     if (kind === HAMT_COLLISION) {
-      const count = arena.words[base + MAP_A] as number;
+      const count = collisionCount(arena, current);
       for (let i = 0; i < count; i += 1) {
         const at = dataIndex(base, i);
         if ((arena.words[at] as number) !== Tag.String) continue;

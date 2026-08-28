@@ -202,6 +202,12 @@ async function finish(): Promise<void> {
   console.log(`  interned strings    ${owner.stats().internedStrings}`);
   console.log(`  live bytes          ${owner.stats().liveBytes}`);
   console.log(`  stranded bytes      ${owner.stats().strandedBytes}`);
+
+  const lastErrors = [...new Set(readerReports.map((r) => r.lastError).filter(Boolean))];
+  if (lastErrors.length > 0) {
+    console.log("\n  distinct failures reported by readers:");
+    for (const message of lastErrors.slice(0, 5)) console.log(`    ${message}`);
+  }
   console.log(`  bump growth, 2nd half ${bumpGrowth} bytes`);
 
   if (values.report) {

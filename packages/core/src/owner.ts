@@ -4,6 +4,7 @@ import { ReaderTable } from "./readers.js";
 import { RetainedRing } from "./retained.js";
 import { StringTable } from "./strings.js";
 import { Header, VerifyMode, type VerifyModeValue } from "./layout.js";
+import { publishChecksum } from "./verify.js";
 import {
   collectBlocks,
   decodeValue,
@@ -94,6 +95,7 @@ export class ArenaOwner {
    */
   #reclaimFloor = 0;
   #historyDepth = 0;
+  #verify: VerifyModeValue = VerifyMode.Header;
   /**
    * Blocks that became unreachable when a version was superseded, keyed by the version
    * that still referenced them. Insertion order is ascending by version, which the
@@ -128,6 +130,7 @@ export class ArenaOwner {
       0,
       Math.min(settings.historyDepth, settings.retainedVersions - 1),
     );
+    owner.#verify = settings.verify;
     owner.commit(undefined);
     return owner;
   }
@@ -144,6 +147,7 @@ export class ArenaOwner {
     const arena = SharedArena.attach(buffer);
     arena.addHeader(Header.OwnerGeneration, 1);
     const owner = new ArenaOwner(arena);
+    owner.#verify = (arena.loadHeader(Header.Flags) & 0b11) as VerifyModeValue;
     owner.#versionId = arena.loadHeader(Header.VersionId);
     owner.#reclaimFloor = arena.loadHeader(Header.ReclaimFloor);
     owner.#currentSlot = {
@@ -191,9 +195,7 @@ export class ArenaOwner {
     try {
       slot = encodeValue(context, value);
     } catch (error) {
-      // Encoding failed part way. Release what it allocated so a rejected write does not
-      // leak, then let the caller see the original failure.
-      for (const offset of context.allocated) this.#allocator.free(offset);
+      this.#rollback(context);
       throw error;
     }
 
@@ -231,7 +233,7 @@ export class ArenaOwner {
       recipe(draft.proxy as T);
       slot = finalizeState(context, draft.state);
     } catch (error) {
-      for (const offset of context.allocated) this.#allocator.free(offset);
+      this.#rollback(context);
       throw error;
     }
 
@@ -255,6 +257,25 @@ export class ArenaOwner {
     return decodeValue(this.arena, this.#currentSlot);
   }
 
+  /**
+   * Undo a commit that failed part way.
+   *
+   * Both lists matter. The allocated blocks are obvious. The interning journal is less so:
+   * strings are append only and never freed during normal operation, so without releasing
+   * the ones a rejected write created, a sequence of rejected writes would consume the arena
+   * permanently. A window that can request writes could then exhaust it with writes that
+   * were all refused.
+   */
+  #rollback(context: EncodeContext): void {
+    for (const offset of context.allocated) this.#allocator.free(offset);
+    this.#strings.forget(context.interned);
+    // Freeing returns the blocks to their size classes, which is not enough on its own: a
+    // write that filled the arena with small records leaves it unable to serve a larger
+    // request, because there is no coalescing. Rewinding the bump pointer past everything
+    // this commit allocated returns the arena to exactly where it was.
+    this.#allocator.rewindTo(context.bumpBefore);
+  }
+
   #newContext(): EncodeContext {
     return {
       arena: this.arena,
@@ -262,6 +283,8 @@ export class ArenaOwner {
       strings: this.#strings,
       allocated: [],
       retired: [],
+      interned: [],
+      bumpBefore: this.#allocator.stats().bumpPointer,
     };
   }
 
@@ -295,6 +318,9 @@ export class ArenaOwner {
     arena.storeHeader(Header.RootTag, slot.tag);
     arena.storeHeader(Header.RootPayload, slot.payload);
     arena.storeHeader(Header.VersionId, version);
+    // The checksum goes inside the seqlock too, so a reader that observes the new version
+    // always observes the checksum that matches it rather than the previous one.
+    publishChecksum(arena, slot, version, this.#verify);
     // Even sequence: the root is stable again.
     arena.addHeader(Header.Sequence, 1);
   }

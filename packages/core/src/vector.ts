@@ -1,7 +1,7 @@
 import type { SharedArena } from "./arena.js";
 import type { Allocator } from "./allocator.js";
 import { ArenaCorruptError } from "./errors.js";
-import { WORD } from "./layout.js";
+import { SLOT_BYTES, WORD } from "./layout.js";
 import type { Slot } from "./values.js";
 
 /**
@@ -68,7 +68,12 @@ export function readHeader(arena: SharedArena, vector: number): VectorHeader {
   }
   const count = arena.words[base + H_COUNT] as number;
   const shift = arena.words[base + H_SHIFT] as number;
-  if (count < 0 || shift < 0 || shift > 30) {
+  // Every element occupies at least one eight byte slot somewhere, so a count larger than the
+  // buffer can hold is impossible. Without this bound a corrupted count sends the decoder off
+  // to build an array of two billion elements, which takes the process down rather than
+  // failing closed. The fuzzer found this by crashing V8.
+  const impossibleCount = count < 0 || count > arena.byteLength / SLOT_BYTES;
+  if (impossibleCount || shift < 0 || shift > 30) {
     throw new ArenaCorruptError(
       `vector at ${vector} has an impossible count ${count} or shift ${shift}`,
       { offset: vector },
@@ -378,18 +383,60 @@ export function vectorSlots(arena: SharedArena, vector: number): Slot[] {
 }
 
 /**
- * Build a vector from slots.
+ * Build a vector from slots, bottom up.
  *
- * Used for array literals and for operations that cannot be expressed as a path copy, such
- * as splice and sort. Those are linear in the array length by nature, and the API documents
- * which operations are which rather than hiding it.
+ * Used for array literals and for the operations that cannot be expressed as a path copy,
+ * such as splice and sort.
+ *
+ * Built in one pass rather than by repeated push. Pushing N elements copies the tail leaf on
+ * every call and allocates a header each time, so building a twenty thousand element array
+ * that way churned megabytes of intermediate blocks and could exhaust an arena that had
+ * ample room for the result. This allocates the leaves once, the internal nodes once, and one
+ * header.
  */
 export function vectorFromSlots(context: VectorContext, slots: readonly Slot[]): number {
-  let vector = emptyVector(context);
-  // The intermediate headers are retired by push itself, so this leaves exactly one live
-  // header behind.
-  for (const slot of slots) vector = vectorPush(context, vector, slot);
-  return vector;
+  const arena = context.arena;
+  const count = slots.length;
+  if (count === 0) return emptyVector(context);
+
+  // The tail holds the last partial chunk, or a full one when the count divides evenly.
+  const tailLength = ((count - 1) % WIDTH) + 1;
+  const trieCount = count - tailLength;
+
+  const tail = allocLeaf(context, tailLength);
+  for (let i = 0; i < tailLength; i += 1) {
+    writeLeafSlot(arena, tail, i, slots[trieCount + i] as Slot);
+  }
+
+  if (trieCount === 0) return allocHeader(context, count, 0, 0, tail);
+
+  let level: number[] = [];
+  for (let start = 0; start < trieCount; start += WIDTH) {
+    const leaf = allocLeaf(context, WIDTH);
+    for (let i = 0; i < WIDTH; i += 1) {
+      writeLeafSlot(arena, leaf, i, slots[start + i] as Slot);
+    }
+    level.push(leaf);
+  }
+
+  // A single leaf is addressed with shift zero, so the depth only starts counting once there
+  // is an internal node above it.
+  let shift = 0;
+  while (level.length > 1) {
+    const parents: number[] = [];
+    for (let start = 0; start < level.length; start += WIDTH) {
+      const children = level.slice(start, start + WIDTH);
+      const node = allocNode(context, children.length);
+      for (let i = 0; i < children.length; i += 1) {
+        arena.words[node / WORD + 2 + i] = children[i] as number;
+      }
+      parents.push(node);
+    }
+    level = parents;
+    shift += BITS;
+  }
+
+  return allocHeader(context, count, shift, level[0] as number, tail);
 }
 
 /** Every node making up a vector, for retiring a structure the writer is discarding. */
@@ -398,15 +445,34 @@ export function vectorNodes(arena: SharedArena, vector: number, out: number[] = 
   const header = readHeader(arena, vector);
   out.push(vector);
   if (header.tail !== 0) out.push(header.tail);
-  if (header.root !== 0) collectTrie(arena, header.root, header.shift, out);
+  // A node needs at least three words, so the buffer cannot hold more than this many however
+  // a corrupt trie is arranged. Without the bound, a child pointing back at an ancestor fans
+  // out inside the shift bound and exhausts the heap.
+  const budget = Math.ceil(arena.byteLength / 12);
+  if (header.root !== 0) collectTrie(arena, header.root, header.shift, out, budget);
   return out;
 }
 
-function collectTrie(arena: SharedArena, node: number, shift: number, out: number[]): void {
+function collectTrie(
+  arena: SharedArena,
+  node: number,
+  shift: number,
+  out: number[],
+  budget: number,
+): void {
+  if (shift < 0) {
+    throw new ArenaCorruptError("vector trie walk went below the leaf level", { offset: node });
+  }
+  if (out.length > budget) {
+    throw new ArenaCorruptError(
+      `vector walk exceeded ${budget} nodes, which is more than the buffer can hold`,
+      { offset: node },
+    );
+  }
   out.push(node);
   if (shift === 0) return;
   const count = nodeCount(arena, node);
   for (let i = 0; i < count; i += 1) {
-    collectTrie(arena, childAt(arena, node, i), shift - BITS, out);
+    collectTrie(arena, childAt(arena, node, i), shift - BITS, out, budget);
   }
 }
