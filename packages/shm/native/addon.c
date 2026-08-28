@@ -89,24 +89,29 @@ typedef struct {
 #define MAP_BYTES(r) (HEADER_BYTES + 2u * (r)->data_size)
 
 #ifdef _WIN32
-static uint64_t load_word(const Region* r) {
-  return (uint64_t)InterlockedOr64((volatile LONG64*)WORD_PTR(r), 0);
-}
-static void store_word(Region* r, uint64_t v) {
-  InterlockedExchange64((volatile LONG64*)WORD_PTR(r), (LONG64)v);
-}
+/* Loads must be pure loads: readers hold a read only mapping, and the tempting
+ * InterlockedOr(p, 0) idiom is a read-modify-write that faults on it. Aligned volatile
+ * loads are single instructions on x64 and ARM64, and the barrier gives them acquire
+ * ordering. Stores stay Interlocked, and only the owner, whose mapping is writable,
+ * ever runs them. */
 static uint32_t load_u32(volatile uint32_t* p) {
-  return (uint32_t)InterlockedOr((volatile LONG*)p, 0);
+  uint32_t v = *p;
+  MemoryBarrier();
+  return v;
 }
 static void store_u32(volatile uint32_t* p, uint32_t v) {
   InterlockedExchange((volatile LONG*)p, (LONG)v);
 }
 static uint64_t load_u64(volatile uint64_t* p) {
-  return (uint64_t)InterlockedOr64((volatile LONG64*)p, 0);
+  uint64_t v = *p;
+  MemoryBarrier();
+  return v;
 }
 static void store_u64(volatile uint64_t* p, uint64_t v) {
   InterlockedExchange64((volatile LONG64*)p, (LONG64)v);
 }
+static uint64_t load_word(const Region* r) { return load_u64(WORD_PTR(r)); }
+static void store_word(Region* r, uint64_t v) { store_u64(WORD_PTR(r), v); }
 static void fence(void) { MemoryBarrier(); }
 static void yield_cpu(void) { SwitchToThread(); }
 #else
