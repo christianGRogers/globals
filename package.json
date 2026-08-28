@@ -22,8 +22,8 @@
     "spike": "node spikes/run-spike.mjs"
   },
   "devDependencies": {
-    "@types/node": "^26.3.0",
-    "typescript": "^5.9.0"
+    "@types/node": "^22.10.0",
+    "typescript": "^7.0.2"
   },
   "license": "MIT",
   "repository": {
