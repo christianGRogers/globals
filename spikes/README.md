@@ -85,9 +85,10 @@ reclamation logic without a window manager.
 npm run gate:example
 ```
 
-The four window example: a table of five thousand rows read synchronously on the render path,
-an editor that demonstrates the read after write contract, a debug panel, and a window on the
-asynchronous tier. See [examples/multi-window/README.md](../examples/multi-window/README.md).
+The example application over the native transport: a table read synchronously on the render
+path, an editor that demonstrates the read after write contract, and a sandboxed window on
+the asynchronous tier. See
+[examples/native-multi-window/README.md](../examples/native-multi-window/README.md).
 
 ## What the Node only spikes can and cannot prove
 

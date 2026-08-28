@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>table, shared tier</title>
+<style>
+  body { font: 13px/1.5 system-ui, sans-serif; margin: 1rem; }
+  h1 { font-size: 1rem; }
+  em { color: #666; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #ddd; padding: 2px 8px; text-align: left; font-variant-numeric: tabular-nums; }
+</style>
+<body>
+<h1>table <em>synchronous reads, sandbox off</em></h1>
+<p id="meta"></p>
+<table><thead><tr><th>#</th><th>name</th><th>value</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+  const render = () => {
+    // One bridge crossing returns everything the render needs.
+    const view = window.store.view();
+    document.getElementById("meta").textContent =
+      `${view.title} · version ${view.version} · ${view.commitCount} edits`;
+    document.getElementById("rows").innerHTML = view.rows
+      .map((row, i) => `<tr><td>${i}</td><td>${row.name}</td><td>${row.value}</td></tr>`)
+      .join("");
+  };
+  render();
+  window.store.onCommit(render);
+</script>
