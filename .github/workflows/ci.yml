@@ -81,7 +81,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run build:native
       - run: npm run build
+      - name: transport soak, forty five seconds across real processes
+        run: node packages/shm/test/soak/run-soak.mjs --readers 4 --seconds 45
       - name: ninety second soak, four readers
         run: node packages/core/dist/test/soak/run-soak.js --readers 4 --seconds 90
       - name: sixty second chaos run
