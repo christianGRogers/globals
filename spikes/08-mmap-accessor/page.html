@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mmap accessor page</title>
+<body>
+<script>
+// The application-facing cost: every call from the page crosses contextBridge. The preload
+// measures the raw addon call; this measures what an app with contextIsolation on would pay.
+(() => {
+  const n = 200000;
+  let sink = 0;
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) sink += window.spike8.loadSlot(0);
+  const bridgedNs = ((performance.now() - t0) / n) * 1e6;
+  window.spike8.mainWorldDone({ bridgedNs, sink });
+})();
+</script>

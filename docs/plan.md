@@ -1,5 +1,10 @@
 # Development plan
 
+> This plan ran its course: the P0 gate failed, finally, and spike 08 measured the route
+> forward. The successor is [plan-native.md](plan-native.md), implementing
+> [ADR 0003](adr/0003-native-transport.md). This document stays as the record of the gates
+> and the off ramps that led there.
+
 Estimates are focused engineering weeks, not calendar time. Phases are ordered because each
 depends on the one before it, and gated because at least two of them can legitimately end
 the project. Every gate is a written pass or fail condition, not a judgement made
