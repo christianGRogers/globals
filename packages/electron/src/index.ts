@@ -30,6 +30,7 @@ export {
   ISOLATION_HEADERS,
   pageUrl,
   registerScheme,
+  resolveRequestPath,
   serveScheme,
 } from "./protocol.js";
 export type { ProtocolOptions } from "./protocol.js";

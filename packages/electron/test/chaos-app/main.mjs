@@ -24,6 +24,9 @@ import { parseArgs } from "node:util";
 import { GlobalsHost, prepare, preloadPath } from "../../dist/src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// packages/electron, because the pages import ../../dist/src directly. Serving the chaos-app
+// directory would 404 every one of those and the windows would load nothing.
+const packageRoot = join(here, "..", "..");
 // Filtering argv down to things starting with two dashes looks like a reasonable way to
 // ignore the switches Electron injects. It is not: it drops the values as well, so
 // "--report path" parses as report being "--seconds". Tolerating unknown tokens is the
@@ -90,7 +93,7 @@ function openWindow(id) {
     },
   });
   host.attach(window, { name: `chaos-${id}` });
-  void window.loadURL(host.url(`ui.html?id=${id}`));
+  void window.loadURL(host.url(`test/chaos-app/ui.html?id=${id}`));
   events.opened += 1;
   return window;
 }
@@ -98,8 +101,8 @@ function openWindow(id) {
 await app.whenReady();
 
 host = await GlobalsHost.start({
-  root: here,
-  ownerPage: "owner.html",
+  root: packageRoot,
+  ownerPage: "test/chaos-app/owner.html",
 });
 
 const windows = new Map();

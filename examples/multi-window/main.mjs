@@ -15,6 +15,13 @@ import { dirname, join } from "node:path";
 import { GlobalsHost, prepare, preloadPath } from "../../packages/electron/dist/src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// The repository root, because these pages import the packages directly from dist rather
+// than through a bundler. A page can only reach what the served root contains, so serving
+// examples/multi-window/renderer would give every import a 404 and three blank windows.
+//
+// A real application bundles its renderer and serves only the bundle. This one is deliberately
+// unbundled so the imports show which package each piece comes from.
+const repositoryRoot = join(here, "..", "..");
 
 // Registering the scheme is the one thing that has to happen before the app is ready.
 prepare();
@@ -22,8 +29,8 @@ prepare();
 await app.whenReady();
 
 const host = await GlobalsHost.start({
-  root: join(here, "renderer"),
-  ownerPage: "owner.html",
+  root: repositoryRoot,
+  ownerPage: "examples/multi-window/renderer/owner.html",
   persistence: { file: join(app.getPath("userData"), "globals-example.json") },
 });
 
@@ -40,7 +47,7 @@ function open({ page, name, title, width = 900, height = 640 }) {
     },
   });
   host.attach(window, { name });
-  void window.loadURL(host.url(page));
+  void window.loadURL(host.url(`examples/multi-window/renderer/${page}`));
   return window;
 }
 
