@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>bc owner</title>
+<body>
+<script type="module">
+const log = (line) => console.log(line);
+log(`owner crossOriginIsolated=${self.crossOriginIsolated}`);
+
+const sab = new SharedArrayBuffer(1024);
+new Int32Array(sab)[0] = 0xC0FFEE;
+
+const channel = new BroadcastChannel("globals-spike");
+channel.addEventListener("messageerror", () => log("OWNER MESSAGEERROR"));
+channel.addEventListener("message", (event) => {
+  if (event.data === "hello") {
+    try {
+      channel.postMessage({ kind: "buffer", sab });
+      log("posted the buffer on the broadcast channel");
+    } catch (error) {
+      log(`POSTING THREW: ${error.name}: ${error.message}`);
+      window.spike.report({ window: "owner", postThrew: error.message });
+    }
+  }
+  if (event.data && event.data.kind === "reader-result") {
+    log(`reader reported: ${JSON.stringify(event.data)}`);
+    window.spike.report({
+      window: "owner",
+      crossOriginIsolated: self.crossOriginIsolated === true,
+      sandboxed: window.spike.sandboxed,
+      readerReceived: event.data.received,
+      readerSawOwnerValue: event.data.sawOwnerValue,
+      ownerSawReaderWrite: new Int32Array(sab)[1] === 0xFACE,
+    });
+  }
+});
+</script>

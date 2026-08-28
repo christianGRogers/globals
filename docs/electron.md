@@ -129,6 +129,25 @@ startOwner({
 Give any window that renders content you do not control the asynchronous tier. See
 [trust-model.md](trust-model.md).
 
+## What the served root has to contain
+
+The mistake that produces a blank window. A page can only reach what the served root
+contains, and a specifier that climbs above it does not reach the filesystem above:
+
+```
+root:  app/renderer
+page:  app/renderer/index.html
+import "../../node_modules/some-package/dist/index.js"
+```
+
+The browser resolves that against the scheme origin before the request is made, so what
+arrives is `/node_modules/some-package/dist/index.js` with the climb already collapsed. It is
+served from `app/renderer/node_modules/...`, which does not exist, and the window loads
+nothing.
+
+Bundle the renderer and serve the bundle, which is what a real application does. If you serve
+unbundled sources, serve a root that contains everything they import.
+
 ## The custom protocol
 
 `SharedArrayBuffer` transfers between renderers only when they are cross origin isolated,

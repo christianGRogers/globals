@@ -1,6 +1,14 @@
 import { protocol, net } from "electron";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize, sep } from "node:path";
+import { extname } from "node:path";
+
+import {
+  DEFAULT_SCHEME,
+  ISOLATION_HEADERS,
+  MIME,
+  pageUrl,
+  resolveRequestPath,
+} from "./paths.js";
 
 /**
  * The custom protocol.
@@ -13,44 +21,27 @@ import { extname, join, normalize, sep } from "node:path";
  * That is the constraint behind the awkward part of adoption: an application that loads its
  * UI from `file://` has to move to a custom scheme before it can use the shared tier. There
  * is no way around it that keeps the sandbox on.
+ *
+ * The path resolution lives in paths.ts, which imports nothing from Electron so that it can
+ * be tested by a plain Node test runner.
  */
 
 export interface ProtocolOptions {
   /** Scheme name. Must be registered before the app is ready. */
   scheme?: string;
-  /** Directory served for the scheme. Requests cannot escape it. */
+  /**
+   * Directory served for the scheme. Requests cannot escape it.
+   *
+   * Everything the pages import has to be inside it. A specifier that climbs above the root
+   * is collapsed by the browser before the request arrives, so it becomes a 404 rather than
+   * a file from the directory above.
+   */
   root: string;
   /** Served when a request has no path. */
   index?: string;
   /** Forwarded to an upstream dev server instead of the filesystem, if given. */
   devServer?: string;
 }
-
-export const DEFAULT_SCHEME = "globals-app";
-
-const MIME: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".map": "application/json; charset=utf-8",
-};
-
-/** The headers that make `crossOriginIsolated` true. */
-export const ISOLATION_HEADERS = {
-  "cross-origin-opener-policy": "same-origin",
-  "cross-origin-embedder-policy": "require-corp",
-  "cross-origin-resource-policy": "same-origin",
-} as const;
 
 /**
  * Register the scheme as privileged.
@@ -84,7 +75,7 @@ export function registerScheme(scheme: string = DEFAULT_SCHEME): void {
  */
 export function serveScheme(options: ProtocolOptions): void {
   const scheme = options.scheme ?? DEFAULT_SCHEME;
-  const root = normalize(options.root);
+  const root = options.root;
   const index = options.index ?? "index.html";
 
   protocol.handle(scheme, async (request) => {
@@ -104,14 +95,8 @@ export function serveScheme(options: ProtocolOptions): void {
       return new Response(response.body, { status: response.status, headers });
     }
 
-    const segments = decodeURIComponent(url.pathname)
-      .split("/")
-      .filter((segment) => segment.length > 0 && segment !== "." && segment !== "..");
-    const file = segments.length === 0 ? join(root, index) : join(root, ...segments);
-
-    // Belt and braces against traversal: the segment filter already removes "..", and this
-    // rejects anything that still resolves outside the root.
-    if (!normalize(file).startsWith(root + sep) && normalize(file) !== root) {
+    const file = resolveRequestPath(root, url.pathname, index);
+    if (file === undefined) {
       return new Response("forbidden", { status: 403, headers: ISOLATION_HEADERS });
     }
 
@@ -130,7 +115,4 @@ export function serveScheme(options: ProtocolOptions): void {
   });
 }
 
-/** The URL a window should load for a page under the served root. */
-export function pageUrl(page: string, scheme: string = DEFAULT_SCHEME): string {
-  return `${scheme}://app/${page.replace(/^\/+/u, "")}`;
-}
+export { DEFAULT_SCHEME, ISOLATION_HEADERS, pageUrl, resolveRequestPath };

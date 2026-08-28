@@ -12,10 +12,17 @@
 <p><button id="write">Write anyway</button> <span id="result" style="color: #666"></span></p>
 <pre id="state" style="background: #f4f4f4; padding: 8px; max-height: 220px; overflow: auto"></pre>
 
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
 import { connect } from "../../../packages/electron/dist/src/renderer.js";
 
-const store = await connect();
+const store = await connect({ name: "untrusted-plugin" });
 
 document.getElementById("tier").textContent = [
   `tier                 ${store.tier}`,

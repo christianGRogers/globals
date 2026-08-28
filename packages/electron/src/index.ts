@@ -5,43 +5,35 @@
  * that hands each window its buffer before the first render, window lifecycle handling, and
  * persistence.
  *
- * Three entry points, one per process:
+ * Three entry points, one per process, and they are separate imports because a renderer
+ * cannot load the Node built ins the main process side needs:
  *
- *   Main process   GlobalsHost, plus prepare() at module scope
- *   Owner window   startOwner()
- *   UI window      connect()
+ *   Main process   "@globals/electron"           GlobalsHost, prepare, preloadPath
+ *   Owner window   "@globals/electron/owner"     startOwner
+ *   UI window      "@globals/electron/renderer"  connect
  */
 
 export { GlobalsHost, prepare } from "./host.js";
-export type { HostOptions, AttachOptions } from "./host.js";
-export { startOwner } from "./owner-page.js";
-export type { StartOwnerOptions } from "./owner-page.js";
-export { createOwnerRuntime } from "./owner-runtime.js";
-export type {
-  MessagePortLike,
-  Operation,
-  OwnerRuntime,
-  OwnerRuntimeOptions,
-} from "./owner-runtime.js";
-export { connect, diagnose, isCrossOriginIsolated } from "./renderer.js";
-export type { AsyncConnection, Connection, SharedConnection } from "./renderer.js";
+export type { HostOptions, OpenWindowOptions } from "./host.js";
 export {
   DEFAULT_SCHEME,
   ISOLATION_HEADERS,
   pageUrl,
   registerScheme,
+  resolveRequestPath,
   serveScheme,
 } from "./protocol.js";
 export type { ProtocolOptions } from "./protocol.js";
 export { SnapshotStore } from "./persistence.js";
 export type { PersistenceOptions } from "./persistence.js";
 export { preloadPath } from "./preload-path.js";
-export { CHANNEL, isIntent, isOwnerToWindow } from "./messages.js";
+export { CHANNEL, MARK, isOwnerToWindow, isWindowToOwner } from "./messages.js";
 export type {
   BindMessage,
   Intent,
-  IntentResult,
   OwnerToWindow,
-  VersionNotice,
+  ResultMessage,
+  VersionMessage,
+  WindowToOwner,
   WriteIntent,
 } from "./messages.js";

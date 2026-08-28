@@ -17,10 +17,17 @@
 </p>
 <pre id="proof" style="background: #f4f4f4; padding: 8px"></pre>
 
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
 import { connect } from "../../../packages/electron/dist/src/renderer.js";
 
-const store = await connect();
+const store = await connect({ name: "editor" });
 const nameInput = document.getElementById("name");
 const scoreInput = document.getElementById("score");
 

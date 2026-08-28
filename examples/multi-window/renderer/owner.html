@@ -5,8 +5,15 @@
 <h1 style="font-size: 15px">Owner window</h1>
 <p>Hidden in the real application. Shown here so the example is inspectable.</p>
 <pre id="log" style="background: #f4f4f4; padding: 8px; max-height: 300px; overflow: auto"></pre>
+<script type="importmap">
+{
+  "imports": {
+    "@globals/core": "/packages/core/dist/src/index.js"
+  }
+}
+</script>
 <script type="module">
-import { startOwner } from "../../../packages/electron/dist/src/index.js";
+import { startOwner } from "../../../packages/electron/dist/src/owner.js";
 
 const log = (line) => {
   const element = document.getElementById("log");

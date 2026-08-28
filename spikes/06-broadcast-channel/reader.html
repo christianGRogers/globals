@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>bc reader</title>
+<body>
+<script type="module">
+const log = (line) => console.log(line);
+log(`reader crossOriginIsolated=${self.crossOriginIsolated}`);
+
+const channel = new BroadcastChannel("globals-spike");
+channel.addEventListener("messageerror", () => {
+  log("READER MESSAGEERROR: the payload could not be deserialised here");
+  channel.postMessage({ kind: "reader-result", received: false, deserialised: false });
+});
+channel.addEventListener("message", (event) => {
+  if (!event.data || event.data.kind !== "buffer") return;
+  const sab = event.data.sab;
+  const i32 = new Int32Array(sab);
+  const sawOwnerValue = Atomics.load(i32, 0) === 0xC0FFEE;
+  log(`READER RECEIVED ${sab.byteLength} bytes, owner value seen: ${sawOwnerValue}`);
+  Atomics.store(i32, 1, 0xFACE);
+  channel.postMessage({ kind: "reader-result", received: true, sawOwnerValue });
+});
+
+// The owner may not be listening yet, so say hello until it answers.
+const hello = setInterval(() => channel.postMessage("hello"), 200);
+setTimeout(() => clearInterval(hello), 8000);
+</script>

@@ -28,8 +28,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         electron: ["31", "32", "33"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -41,6 +41,11 @@ jobs:
       - name: run the sharing spike under xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: spike01-${{ matrix.os }}-electron${{ matrix.electron }}
+          path: spikes/01-share-buffer/spike01-result.json
 
   chaos:
     name: window lifecycle chaos, electron ${{ matrix.electron }}, ${{ matrix.os }}
@@ -52,8 +57,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         electron: ["33"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -62,13 +67,18 @@ jobs:
       - run: npm install --no-save electron@^${{ matrix.electron }}
       - name: chaos, real windows opened, reloaded, and crashed
         if: runner.os != 'Linux'
-        run: npx electron packages/electron/test/chaos-app/main.mjs --seconds 120
+        run: >
+          node scripts/run-electron.mjs packages/electron/test/chaos-app/main.mjs
+          --report packages/electron/test/chaos-app/chaos-result.json
+          --seconds 120
       - name: chaos under xvfb
         if: runner.os == 'Linux'
         run: >
           xvfb-run --auto-servernum
-          npx electron packages/electron/test/chaos-app/main.mjs --seconds 120
-      - uses: actions/upload-artifact@v4
+          node scripts/run-electron.mjs packages/electron/test/chaos-app/main.mjs
+          --report packages/electron/test/chaos-app/chaos-result.json
+          --seconds 120
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: chaos-${{ matrix.os }}-electron${{ matrix.electron }}
@@ -80,8 +90,8 @@ jobs:
     timeout-minutes: 20
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -89,3 +99,8 @@ jobs:
       - run: npm install --no-save electron@beta
       - name: canary, failure here is a warning not a break
         run: xvfb-run --auto-servernum node spikes/run-spike.mjs 01
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: spike01-canary
+          path: spikes/01-share-buffer/spike01-result.json

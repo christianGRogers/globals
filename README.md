@@ -3,10 +3,16 @@
 Synchronous reads of shared application state across Electron processes, built on one region
 of real shared memory.
 
-> **Status: 0.1.0, pre-release.** The feasibility gate that decides whether this can work at
-> all has not been cleared on a machine with a display. Read
-> [docs/stability.md](docs/stability.md) and [docs/trust-model.md](docs/trust-model.md) before
-> adopting it.
+> **Status: the feasibility gate has failed. Do not adopt this.**
+>
+> A `SharedArrayBuffer` does not cross a renderer process boundary in Electron 33 by any
+> mechanism measured. The one that delivers the buffer, `window.open`, puts every window in a
+> single renderer process, which is not the problem this library exists to solve. The
+> measurements, including process ids, are in [spikes/RESULTS.md](spikes/RESULTS.md), and the
+> options are the off ramps in [docs/plan.md](docs/plan.md).
+>
+> The core is unaffected and runs: it is runtime agnostic, tested, and reusable in any of the
+> off ramps. What fails is the Electron handshake.
 
 ## The contract
 
@@ -121,6 +127,17 @@ npm run chaos     # windows opened, reloaded, frozen, and killed
 npm run fuzz      # the decoder against deliberately corrupted arenas
 npm run bench     # read latency
 ```
+
+Two checks need a real display and open windows, so they are not part of continuous
+integration on this machine:
+
+```bash
+npm run gate         # spike 01, the go or no go for the whole project
+npm run gate:chaos   # window lifecycle chaos, with real renderer processes
+npm run gate:example # the four window example application
+```
+
+What each verdict means is in [spikes/README.md](spikes/README.md).
 
 Branching follows a gitflow variant described in [docs/branching.md](docs/branching.md).
 Continuous integration is described in [docs/ci.md](docs/ci.md). Work lands on `dev`. Only a
