@@ -5,10 +5,10 @@
  * Spikes are throwaway diagnostics, not tests. They print a measurement and a gate
  * verdict, and they exit nonzero when a gate fails.
  */
-import { spawn } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+
+import { launch } from "../scripts/run-electron.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -54,67 +54,15 @@ async function runNode(spike, rest) {
 }
 
 async function runElectron(spike, rest) {
-  // Resolve the binary through the electron module rather than npx. On Windows, spawning a
-  // .cmd shim without a shell fails with EINVAL on current Node, and going through a shell
-  // to work around that loses the exit code the gate depends on.
-  let binary;
-  try {
-    const module = await import("electron");
-    binary = module.default;
-  } catch {
-    console.error("Electron is not installed. Install it first:");
-    console.error("  npm install --no-save electron@^33");
-    return 127;
-  }
-  if (typeof binary !== "string") {
-    console.error("the electron module did not resolve to a binary path");
-    return 127;
-  }
-
+  // Delegates to the shared launcher. Resolving the binary and printing a verdict file are
+  // the same problem here as anywhere else, and keeping a second copy of the answer is how
+  // the Windows spawn bug would come back.
   const reportPath = join(here, "01-share-buffer", "spike01-result.json");
-  await rm(reportPath, { force: true });
-
-  const code = await new Promise((resolve) => {
-    const child = spawn(
-      binary,
-      [join(here, spike.entry), `--report=${reportPath}`, ...rest],
-      { stdio: "inherit", cwd: join(here, "..") },
-    );
-    child.on("error", (error) => {
-      console.error(`could not start Electron: ${error.message}`);
-      resolve(127);
-    });
-    child.on("exit", (exitCode) => resolve(exitCode ?? 1));
+  return launch({
+    entry: join(here, spike.entry),
+    reportPath,
+    args: [`--report=${reportPath}`, ...rest],
   });
-
-  // An Electron main process on Windows is a GUI subsystem binary, so its console output
-  // never reaches this pipe. The report file is the authority on every platform.
-  let report;
-  try {
-    report = JSON.parse(await readFile(reportPath, "utf8"));
-  } catch {
-    console.error("the spike produced no report. It crashed before it could decide.");
-    return code === 0 ? 1 : code;
-  }
-
-  console.log(
-    `spike 01 on Electron ${report.electron}, Chromium ${report.chromium}, ` +
-      `${report.platform} ${report.arch}\n`,
-  );
-  for (const window of report.reports ?? []) {
-    console.log(`  ${String(window.window).padEnd(8)} ${JSON.stringify(window)}`);
-  }
-  console.log("");
-  for (const check of report.checks ?? []) {
-    const detail = check.detail ? `, ${check.detail}` : "";
-    console.log(`${check.pass ? "PASS" : "FAIL"}  ${check.name}${detail}`);
-  }
-  console.log(
-    report.verdict === "PASS"
-      ? "\ngate: PASS, the topology is implementable on this Electron version"
-      : "\ngate: FAIL, see docs/plan.md off ramps",
-  );
-  return report.verdict === "PASS" ? 0 : 1;
 }
 
 const [command, ...rest] = process.argv.slice(2);

@@ -21,9 +21,11 @@
     "lint": "npm run typecheck && node scripts/check-docs.mjs",
     "spike": "node spikes/run-spike.mjs",
     "chaos": "npm run build && node packages/core/dist/test/soak/run-chaos.js",
-    "spike:electron": "node spikes/run-spike.mjs 01",
     "fuzz": "npm run build && node packages/core/dist/test/fuzz/run-fuzz.js",
-    "verify": "npm run build && node scripts/run-tests.mjs && node scripts/check-docs.mjs"
+    "verify": "npm run build && node scripts/run-tests.mjs && node scripts/check-docs.mjs",
+    "gate": "node spikes/run-spike.mjs 01",
+    "gate:chaos": "npm run build && node scripts/run-electron.mjs packages/electron/test/chaos-app/main.mjs --report packages/electron/test/chaos-app/chaos-result.json --seconds 60",
+    "gate:example": "npm run build && node scripts/run-electron.mjs examples/multi-window/main.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

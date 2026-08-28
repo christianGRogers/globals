@@ -55,6 +55,8 @@ function serve() {
   });
 }
 
+const loadFailures = [];
+
 function createWindow({ page, show, title }) {
   const window = new BrowserWindow({
     show,
@@ -69,8 +71,21 @@ function createWindow({ page, show, title }) {
       nodeIntegration: false,
     },
   });
+
+  // The listeners go on before loadURL, not after. Attaching them afterwards is a race: a
+  // load that finishes first never resolves the promise, the spike hangs, and the watchdog
+  // reports a gate failure that says nothing about whether the buffer can be shared. A
+  // spurious failure on a go or no go decision is worse than no result.
+  const loaded = new Promise((resolve) => {
+    window.webContents.once("did-finish-load", () => resolve());
+    window.webContents.once("did-fail-load", (_event, code, description, url) => {
+      loadFailures.push(`${title} failed to load ${url}: ${description} (${code})`);
+      resolve();
+    });
+  });
+
   void window.loadURL(`${SCHEME}://spike/${page}`);
-  return window;
+  return { window, loaded };
 }
 
 const reports = [];
@@ -149,7 +164,6 @@ serve();
 // The watchdog is armed before anything can block, because the failure this spike most
 // needs to report is a window that never finishes loading. Arming it after the load would
 // mean that failure produces no verdict at all, which is what happened the first time.
-const loadFailures = [];
 const watchdog = setTimeout(() => {
   const detail =
     loadFailures.length > 0
@@ -162,24 +176,14 @@ const watchdog = setTimeout(() => {
 }, 20_000);
 
 const owner = createWindow({ page: "owner.html", show: false, title: "owner" });
-const readerWindows = [
+const readers = [
   createWindow({ page: "ui.html?name=ui-a", show: true, title: "ui-a" }),
   createWindow({ page: "ui.html?name=ui-b", show: true, title: "ui-b" }),
 ];
-expectedReports = 1 + readerWindows.length;
+const readerWindows = readers.map((entry) => entry.window);
+expectedReports = 1 + readers.length;
 
-await Promise.all(
-  [owner, ...readerWindows].map(
-    (window) =>
-      new Promise((resolve) => {
-        window.webContents.once("did-finish-load", () => resolve());
-        window.webContents.once("did-fail-load", (_event, code, description, url) => {
-          loadFailures.push(`${window.getTitle()} failed to load ${url}: ${description} (${code})`);
-          resolve();
-        });
-      }),
-  ),
-);
+await Promise.all([owner, ...readers].map((entry) => entry.loaded));
 
 if (loadFailures.length > 0) {
   clearTimeout(watchdog);
@@ -192,7 +196,7 @@ if (loadFailures.length > 0) {
   // One port pair per reader. The owner keeps one end of each.
   for (const reader of readerWindows) {
     const { port1, port2 } = new MessageChannelMain();
-    owner.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
+    owner.window.webContents.postMessage("spike:port", { peer: reader.getTitle() }, [port1]);
     reader.webContents.postMessage("spike:port", { peer: "owner" }, [port2]);
   }
 }
