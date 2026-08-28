@@ -6,8 +6,17 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-28
+
+First pre-release. The contract, the arena, the object layer, the Electron integration, the
+framework bindings, and the hardening work. The feasibility gate that decides whether the
+topology works on a given Electron version has not been cleared on a machine with a display,
+which [docs/stability.md](docs/stability.md) states rather than implies.
+
 ### Added
 
+- Documentation: the contract, the trust model, migration notes that open with when not to
+  switch, an API reference, and a stability statement naming the supported Electron range.
 - Repository scaffold, workspace layout, and branching model.
 - Continuous integration: build matrix, soak, Electron matrix, CodeQL, gated release.
 - Phase 0 feasibility spikes, with recorded results in `spikes/RESULTS.md`.
@@ -80,3 +89,6 @@ All notable changes to this project are recorded here. The format follows
 - Verified reads compared a checksum from one version against a root from another, because
   the checksum was loaded after the seqlock window rather than inside it. It reported
   corruption that was not there at a rate of roughly fifty in eight hundred thousand reads.
+
+[Unreleased]: https://github.com/christianGRogers/globals/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/christianGRogers/globals/releases/tag/v0.1.0
