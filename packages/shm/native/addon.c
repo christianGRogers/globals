@@ -1,21 +1,47 @@
 /*
  * The native transport. One file-backed region, mapped into every process that opens it,
- * written by exactly one owner and copied out by readers under a seqlock.
+ * written by exactly one owner and copied out by readers, with two data slots so the copy
+ * out never races the copy in.
  *
  * Nothing here ever hands V8 a pointer it does not own. The mapping is read and written
  * only inside these functions, and the reader's copy lands in a caller-supplied buffer that
  * V8 allocated, which is what keeps the memory cage out of the picture. That constraint is
  * the reason this file exists at all; see spikes/03-memory-cage and spikes/08-mmap-accessor.
  *
- * Region layout:
+ * The protocol is double buffered rather than a bare seqlock, and the transport soak is
+ * why. Layout one held the lock for the whole flush memcpy, so a writer at full rate on a
+ * large region left stable windows barely longer than the reader's own copy, and a reader
+ * could retry to the point of livelock. Now the writer builds every commit in the slot the
+ * last commit did not publish and then publishes (version, slot) as one atomic word. A
+ * reader copies the published slot and rereads the word: the copy is torn only if the
+ * writer completed two whole commits during it, and a commit cannot be faster than the copy
+ * it would have to lap, so the retry is a rarity instead of a livelock.
+ *
+ * The inactive slot is one commit stale, so each flush first reapplies the previous
+ * commit's ranges from the owner's current mirror, which brings every byte the last two
+ * commits touched up to date; bytes older than that are already equal in both slots.
+ *
+ * Each slot carries its own sequence and version, because the published word alone cannot
+ * reveal a write in progress: a reader could start copying the published slot just as the
+ * writer, one commit later, starts rewriting that same slot underneath it. The slot's
+ * sequence is odd exactly while the writer is inside it, so the reader's bracket read
+ * catches the overlap and retries, and the retry is bounded because the writer alternates
+ * slots and must complete a whole further commit before touching the same slot again.
+ *
+ * Region layout, version 2:
  *   0   u32  magic, "GSM1"
  *   4   u32  layout version
- *   8   u32  seqlock sequence, even when stable, odd while a flush is in flight
- *   12  u32  reserved
- *   16  u64  data size in bytes
- *   24  u64  commit count, the version a reader's sync returns
- *   32       reserved up to 64
- *   64       the data region
+ *   8   u64  reserved
+ *   16  u64  data size in bytes, per slot
+ *   24  u64  the word: version << 1 | published slot index
+ *   32  u32  slot 0 sequence, odd while the writer is inside slot 0
+ *   36       reserved
+ *   40  u64  slot 0 version
+ *   48  u32  slot 1 sequence
+ *   52       reserved
+ *   56  u64  slot 1 version
+ *   64                 slot 0
+ *   64 + dataSize      slot 1
  */
 #include <node_api.h>
 #include <stdint.h>
@@ -33,20 +59,22 @@
 #endif
 
 #define SHM_MAGIC 0x314d5347u /* "GSM1" read as little endian bytes G S M 1 */
-#define SHM_LAYOUT_VERSION 1u
+#define SHM_LAYOUT_VERSION 2u
 #define HEADER_BYTES 64u
 #define SYNC_RETRY_CAP 50000000u
 
 #define OFF_MAGIC 0u
 #define OFF_LAYOUT 4u
-#define OFF_SEQ 8u
 #define OFF_DATA_SIZE 16u
-#define OFF_COMMIT 24u
+#define OFF_WORD 24u
 
 typedef struct {
   volatile uint8_t* map;
   uint64_t data_size;
   int owner;
+  /* The previous commit's ranges, owner side only: offset,length pairs. */
+  uint32_t* prev_ranges;
+  size_t prev_pairs;
 #ifdef _WIN32
   HANDLE mapping;
 #else
@@ -54,38 +82,51 @@ typedef struct {
 #endif
 } Region;
 
-#define SEQ_PTR(r) ((volatile uint32_t*)((r)->map + OFF_SEQ))
-#define COMMIT_PTR(r) ((volatile uint64_t*)((r)->map + OFF_COMMIT))
-#define DATA_PTR(r) ((r)->map + HEADER_BYTES)
+#define WORD_PTR(r) ((volatile uint64_t*)((r)->map + OFF_WORD))
+#define SLOT_SEQ_PTR(r, s) ((volatile uint32_t*)((r)->map + 32u + 16u * (s)))
+#define SLOT_VER_PTR(r, s) ((volatile uint64_t*)((r)->map + 40u + 16u * (s)))
+#define SLOT_PTR(r, s) ((r)->map + HEADER_BYTES + (uint64_t)(s) * (r)->data_size)
+#define MAP_BYTES(r) (HEADER_BYTES + 2u * (r)->data_size)
 
 #ifdef _WIN32
-static uint32_t load_seq(const Region* r) {
-  return (uint32_t)InterlockedOr((volatile LONG*)SEQ_PTR(r), 0);
+/* Loads must be pure loads: readers hold a read only mapping, and the tempting
+ * InterlockedOr(p, 0) idiom is a read-modify-write that faults on it. Aligned volatile
+ * loads are single instructions on x64 and ARM64, and the barrier gives them acquire
+ * ordering. Stores stay Interlocked, and only the owner, whose mapping is writable,
+ * ever runs them. */
+static uint32_t load_u32(volatile uint32_t* p) {
+  uint32_t v = *p;
+  MemoryBarrier();
+  return v;
 }
-static void store_seq(Region* r, uint32_t v) {
-  InterlockedExchange((volatile LONG*)SEQ_PTR(r), (LONG)v);
+static void store_u32(volatile uint32_t* p, uint32_t v) {
+  InterlockedExchange((volatile LONG*)p, (LONG)v);
 }
-static uint64_t load_commit(const Region* r) {
-  return (uint64_t)InterlockedOr64((volatile LONG64*)COMMIT_PTR(r), 0);
+static uint64_t load_u64(volatile uint64_t* p) {
+  uint64_t v = *p;
+  MemoryBarrier();
+  return v;
 }
-static void store_commit(Region* r, uint64_t v) {
-  InterlockedExchange64((volatile LONG64*)COMMIT_PTR(r), (LONG64)v);
+static void store_u64(volatile uint64_t* p, uint64_t v) {
+  InterlockedExchange64((volatile LONG64*)p, (LONG64)v);
 }
+static uint64_t load_word(const Region* r) { return load_u64(WORD_PTR(r)); }
+static void store_word(Region* r, uint64_t v) { store_u64(WORD_PTR(r), v); }
 static void fence(void) { MemoryBarrier(); }
+static void yield_cpu(void) { SwitchToThread(); }
 #else
-static uint32_t load_seq(const Region* r) {
-  return __atomic_load_n(SEQ_PTR(r), __ATOMIC_ACQUIRE);
+static uint64_t load_word(const Region* r) {
+  return __atomic_load_n(WORD_PTR(r), __ATOMIC_ACQUIRE);
 }
-static void store_seq(Region* r, uint32_t v) {
-  __atomic_store_n(SEQ_PTR(r), v, __ATOMIC_RELEASE);
+static void store_word(Region* r, uint64_t v) {
+  __atomic_store_n(WORD_PTR(r), v, __ATOMIC_RELEASE);
 }
-static uint64_t load_commit(const Region* r) {
-  return __atomic_load_n(COMMIT_PTR(r), __ATOMIC_ACQUIRE);
-}
-static void store_commit(Region* r, uint64_t v) {
-  __atomic_store_n(COMMIT_PTR(r), v, __ATOMIC_RELEASE);
-}
+static uint32_t load_u32(volatile uint32_t* p) { return __atomic_load_n(p, __ATOMIC_ACQUIRE); }
+static void store_u32(volatile uint32_t* p, uint32_t v) { __atomic_store_n(p, v, __ATOMIC_RELEASE); }
+static uint64_t load_u64(volatile uint64_t* p) { return __atomic_load_n(p, __ATOMIC_ACQUIRE); }
+static void store_u64(volatile uint64_t* p, uint64_t v) { __atomic_store_n(p, v, __ATOMIC_RELEASE); }
 static void fence(void) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+static void yield_cpu(void) { sched_yield(); }
 #endif
 
 static napi_value fail(napi_env env, const char* code, const char* message) {
@@ -100,12 +141,15 @@ static void region_release(Region* r) {
     if (r->mapping != NULL) CloseHandle(r->mapping);
     r->mapping = NULL;
 #else
-    munmap((void*)r->map, HEADER_BYTES + r->data_size);
+    munmap((void*)r->map, MAP_BYTES(r));
     if (r->fd >= 0) close(r->fd);
     r->fd = -1;
 #endif
     r->map = NULL;
   }
+  free(r->prev_ranges);
+  r->prev_ranges = NULL;
+  r->prev_pairs = 0;
 }
 
 static void finalize_region(napi_env env, void* data, void* hint) {
@@ -166,7 +210,9 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
 #endif
 
 #ifdef _WIN32
-  HANDLE file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
+  /* A reader's mapping is read only, enforced by the OS rather than by convention: no
+   * window that attaches can corrupt shared state, whatever else it can do. */
+  HANDLE file = CreateFileA(path, create ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ,
                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                             create ? OPEN_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (file == INVALID_HANDLE_VALUE) {
@@ -197,28 +243,30 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
     }
   } else {
     LARGE_INTEGER size;
-    size.QuadPart = (LONGLONG)(HEADER_BYTES + data_size);
+    size.QuadPart = (LONGLONG)(HEADER_BYTES + 2u * data_size);
     if (!SetFilePointerEx(file, size, NULL, FILE_BEGIN) || !SetEndOfFile(file)) {
       CloseHandle(file);
       free(r);
       return fail(env, "ESHM_IO", "could not size the region file");
     }
   }
-  r->mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+  r->mapping = CreateFileMappingA(file, NULL, create ? PAGE_READWRITE : PAGE_READONLY, 0, 0, NULL);
   CloseHandle(file);
   if (r->mapping == NULL) {
     free(r);
     return fail(env, "ESHM_IO", "could not create the file mapping");
   }
-  r->map = (volatile uint8_t*)MapViewOfFile(r->mapping, FILE_MAP_ALL_ACCESS, 0, 0,
-                                            (SIZE_T)(HEADER_BYTES + data_size));
+  r->map = (volatile uint8_t*)MapViewOfFile(r->mapping, create ? FILE_MAP_ALL_ACCESS : FILE_MAP_READ,
+                                            0, 0, (SIZE_T)(HEADER_BYTES + 2u * data_size));
   if (r->map == NULL) {
     CloseHandle(r->mapping);
     free(r);
     return fail(env, "ESHM_IO", "could not map the region");
   }
 #else
-  r->fd = open(path, O_RDWR | (create ? O_CREAT : 0), 0600);
+  /* A reader's mapping is read only, enforced by the OS rather than by convention: no
+   * window that attaches can corrupt shared state, whatever else it can do. */
+  r->fd = open(path, create ? (O_RDWR | O_CREAT) : O_RDONLY, 0600);
   if (r->fd < 0) {
     free(r);
     return fail(env, "ESHM_IO", create ? "could not create the region file" : "could not open the region file");
@@ -244,12 +292,13 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
       free(r);
       return fail(env, "ESHM_LAYOUT", "the region uses a layout this build does not understand");
     }
-  } else if (ftruncate(r->fd, (off_t)(HEADER_BYTES + data_size)) != 0) {
+  } else if (ftruncate(r->fd, (off_t)(HEADER_BYTES + 2u * data_size)) != 0) {
     close(r->fd);
     free(r);
     return fail(env, "ESHM_IO", "could not size the region file");
   }
-  void* p = mmap(NULL, HEADER_BYTES + data_size, PROT_READ | PROT_WRITE, MAP_SHARED, r->fd, 0);
+  void* p = mmap(NULL, HEADER_BYTES + 2u * data_size,
+                 create ? (PROT_READ | PROT_WRITE) : PROT_READ, MAP_SHARED, r->fd, 0);
   if (p == MAP_FAILED) {
     close(r->fd);
     free(r);
@@ -267,9 +316,12 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
     memcpy((void*)(r->map + OFF_MAGIC), &magic, 4);
     memcpy((void*)(r->map + OFF_LAYOUT), &layout, 4);
     memcpy((void*)(r->map + OFF_DATA_SIZE), &data_size, 8);
-    store_commit(r, 0);
+    store_u32(SLOT_SEQ_PTR(r, 0), 0);
+    store_u32(SLOT_SEQ_PTR(r, 1), 0);
+    store_u64(SLOT_VER_PTR(r, 0), 0);
+    store_u64(SLOT_VER_PTR(r, 1), 0);
     fence();
-    store_seq(r, 0);
+    store_word(r, 0);
   }
 
   napi_value external;
@@ -319,7 +371,7 @@ static napi_value Version(napi_env env, napi_callback_info info) {
   Region* r = get_region(env, argv[0]);
   if (r == NULL) return NULL;
   napi_value out;
-  napi_create_double(env, (double)load_commit(r), &out);
+  napi_create_double(env, (double)(load_word(r) >> 1), &out);
   return out;
 }
 
@@ -363,19 +415,48 @@ static napi_value Flush(napi_env env, napi_callback_info info) {
     }
   }
 
-  uint32_t s = load_seq(r);
-  store_seq(r, s + 1);
+  uint64_t word = load_word(r);
+  uint64_t version = word >> 1;
+  uint32_t active = (uint32_t)(word & 1u);
+  uint32_t inactive = 1u - active;
+  volatile uint8_t* slot = SLOT_PTR(r, inactive);
+
+  uint32_t sseq = load_u32(SLOT_SEQ_PTR(r, inactive));
+  store_u32(SLOT_SEQ_PTR(r, inactive), sseq + 1);
   fence();
-  for (size_t i = 0; i < range_words; i += 2) {
-    memcpy((void*)(DATA_PTR(r) + pairs[i]), (const uint8_t*)src + pairs[i], pairs[i + 1]);
+
+  /* The inactive slot is one commit behind the published one, and the difference is the
+   * previous commit's ranges. They are copied slot to slot, from the published state, not
+   * from the caller's mirror: the mirror may hold bytes the caller has changed but not
+   * declared this commit, and an undeclared byte must never publish. Bytes older than the
+   * last two commits are already equal in both slots, inductively. */
+  volatile const uint8_t* published = SLOT_PTR(r, active);
+  for (size_t i = 0; i < r->prev_pairs * 2; i += 2) {
+    memcpy((void*)(slot + r->prev_ranges[i]), (const void*)(published + r->prev_ranges[i]),
+           r->prev_ranges[i + 1]);
   }
-  uint64_t commit = load_commit(r) + 1;
-  store_commit(r, commit);
+  for (size_t i = 0; i < range_words; i += 2) {
+    memcpy((void*)(slot + pairs[i]), (const uint8_t*)src + pairs[i], pairs[i + 1]);
+  }
+  store_u64(SLOT_VER_PTR(r, inactive), version + 1);
+
+  /* Remember this commit's ranges for the next flush to reapply. */
+  size_t pair_count = range_words / 2;
+  if (pair_count > r->prev_pairs) {
+    uint32_t* grown = (uint32_t*)realloc(r->prev_ranges, range_words * sizeof(uint32_t));
+    if (grown == NULL) return fail(env, "ESHM_IO", "out of memory tracking ranges");
+    r->prev_ranges = grown;
+  }
+  memcpy(r->prev_ranges, pairs, range_words * sizeof(uint32_t));
+  r->prev_pairs = pair_count;
+
   fence();
-  store_seq(r, s + 2);
+  store_u32(SLOT_SEQ_PTR(r, inactive), sseq + 2);
+  fence();
+  store_word(r, ((version + 1) << 1) | inactive);
 
   napi_value out;
-  napi_create_double(env, (double)commit, &out);
+  napi_create_double(env, (double)(version + 1), &out);
   return out;
 }
 
@@ -401,29 +482,25 @@ static napi_value Sync(napi_env env, napi_callback_info info) {
   }
 
   for (uint32_t attempts = 0; attempts < SYNC_RETRY_CAP; attempts++) {
-    // A reader that spins without yielding can starve the very writer it is waiting on
-    // when cores are scarce, which converts contention into livelock. Give the scheduler
-    // a chance regularly; the fast path never reaches this.
-    if (attempts != 0 && (attempts & 1023) == 0) {
-#ifdef _WIN32
-      SwitchToThread();
-#else
-      sched_yield();
-#endif
-    }
-    uint32_t s1 = load_seq(r);
-    if (s1 & 1) continue;
-    memcpy(dest, (const void*)DATA_PTR(r), r->data_size);
-    uint64_t commit = load_commit(r);
+    if (attempts != 0 && (attempts & 15) == 0) yield_cpu();
+    uint32_t s = (uint32_t)(load_word(r) & 1u);
+    uint32_t s1 = load_u32(SLOT_SEQ_PTR(r, s));
+    if (s1 & 1u) continue;
+    memcpy(dest, (const void*)SLOT_PTR(r, s), r->data_size);
+    uint64_t version = load_u64(SLOT_VER_PTR(r, s));
     fence();
-    uint32_t s2 = load_seq(r);
+    uint32_t s2 = load_u32(SLOT_SEQ_PTR(r, s));
+    /* An unchanged even sequence brackets the copy: no writer was inside this slot, so the
+     * bytes are one whole commit and the slot version names which one. A change means the
+     * writer lapped into this slot mid-copy; it must finish an entire further commit before
+     * touching this slot again, so the retry is bounded rather than a livelock. */
     if (s1 == s2) {
       napi_value out;
-      napi_create_double(env, (double)commit, &out);
+      napi_create_double(env, (double)version, &out);
       return out;
     }
   }
-  return fail(env, "ESHM_LIVELOCK", "the writer never left a stable window to copy");
+  return fail(env, "ESHM_LIVELOCK", "the writer lapped this copy repeatedly");
 }
 
 static napi_value Stats(napi_env env, napi_callback_info info) {
@@ -436,7 +513,7 @@ static napi_value Stats(napi_env env, napi_callback_info info) {
   napi_create_object(env, &out);
   napi_create_double(env, (double)r->data_size, &v);
   napi_set_named_property(env, out, "dataSize", v);
-  napi_create_double(env, (double)load_commit(r), &v);
+  napi_create_double(env, (double)(load_word(r) >> 1), &v);
   napi_set_named_property(env, out, "version", v);
   napi_get_boolean(env, r->owner, &v);
   napi_set_named_property(env, out, "owner", v);

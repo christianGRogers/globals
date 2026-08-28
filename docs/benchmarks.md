@@ -1,10 +1,12 @@
 # Benchmarks
 
-Every performance claim in this repository comes from `benchmarks/read-latency.ts`. Run it
-yourself:
+Every performance claim in this repository comes from a harness that ships with it:
+`benchmarks/read-latency.ts` for the arena in isolation, and the native benchmark app for
+the whole stack inside real Electron. Run them yourself:
 
 ```bash
-npm run bench
+npm run bench          # the arena, in Node
+npm run bench:native   # the real path: preload, decode, bridge, and IPC, in Electron
 ```
 
 ## Machine
@@ -37,6 +39,50 @@ times** a plain local property read.
 **Verification is free on this benchmark, and that is the point of how it is built.** The
 checksum is computed once per commit and checked once per version, so a loop reading the same
 version pays nothing. Turning it off moves the numbers by less than the run to run noise.
+
+## The real stack, measured in Electron
+
+The arena numbers above isolate the decoder. An application does not call the decoder; it
+calls `select()` in a preload, or crosses the contextBridge from a page, and its alternative
+is a real `ipcRenderer.invoke` round trip. The native benchmark measures those, in a real
+renderer process over the native transport, on a different machine from the table above, so
+compare ratios within each table rather than numbers across them.
+
+| Field | Value |
+| --- | --- |
+| CPU | Apple M4, 10 logical cores |
+| Memory | 32 GB |
+| Operating system | macOS 26.4.1, arm64 |
+| Electron | 33.4.11 |
+| Date | 2026-08-28 |
+| State | 2000 rows, 1 MB region |
+
+Nanoseconds per operation.
+
+| Measurement | Mean | p50 | p99 |
+| --- | --- | --- | --- |
+| Plain local property read | 4.7 | 4.2 | 9.7 |
+| `select`, double, preload side | 252.7 | 248.2 | 515.4 |
+| `select`, string, preload side | 563.0 | 533.9 | 1615.4 |
+| Snapshot acquire, no decode | 51.2 | 51.1 | 63.0 |
+| `select`, double, across the contextBridge | 873.3 | 850.0 | 950.0 |
+| `select` observing a fresh commit | 79491.5 | 75417.0 | 149875.0 |
+| `ipcRenderer.invoke` round trip | 34815.7 | 34084.0 | 48416.0 |
+
+Reading these numbers honestly:
+
+- A synchronous decoded read in the preload is **138 times faster** than the real IPC round
+  trip it replaces, and the round trip here is the genuine article rather than the worker
+  thread stand-in the arena benchmark uses.
+- A page with context isolation on pays the bridge: 873 ns per crossing, still **40 times
+  faster** than IPC and synchronous. This is why the decode layer belongs on the preload
+  side and why a page API should return everything a render needs in one crossing.
+- Observing a fresh commit costs about 80 µs: the version check misses, the region is
+  copied, and a fresh reader attaches. That price is paid once per commit per window, not
+  per read, and it is roughly two IPC round trips for a whole consistent state. Every read
+  until the next commit is back at 253 ns.
+- The plain local read row says what it always says: shared state is not free. Fifty times
+  a local property read is the cost of the guarantee that the value is the committed one.
 
 ## Reading these numbers honestly
 

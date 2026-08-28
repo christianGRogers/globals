@@ -7,9 +7,10 @@ name: electron-matrix
 # red when the measured verdict stops matching the record, not when the platform behaves
 # as documented.
 #
-# The window lifecycle chaos job is parked until the native transport rewire (plan-native.md,
-# N2) gives it a topology whose survival it can meaningfully test. Its previous failures were
-# the single process topology dying as a group, which is a recorded result, not a regression.
+# The native gates are the affirmative half: spike 08 answers whether the transport works on
+# a given major and platform, and the e2e and chaos apps answer whether the library built on
+# it does. Node-API is ABI stable, so a failure here means Electron changed something the
+# stability document says it watches, which is exactly what a matrix is for.
 on:
   schedule:
     - cron: "0 5 * * 1"
@@ -18,6 +19,9 @@ on:
     branches: [dev]
     paths:
       - "spikes/01-share-buffer/**"
+      - "spikes/08-mmap-accessor/**"
+      - "packages/shm/**"
+      - "packages/electron/**"
       - ".github/workflows/electron-matrix.yml"
 
 permissions:
@@ -60,6 +64,54 @@ jobs:
           name: spike01-${{ matrix.os }}-electron${{ matrix.electron }}
           path: spikes/01-share-buffer/spike01-result.json
 
+  native-gates:
+    name: native gates, electron ${{ matrix.electron }}, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        electron: ["31", "32", "33"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:native
+      - run: npm run build
+      - run: npm install --no-save electron@^${{ matrix.electron }}
+      - name: build the spike 08 addon
+        shell: bash
+        run: cd spikes/08-mmap-accessor && npx node-gyp rebuild
+      - name: spike 08, the transport go or no go for this major
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then runner="xvfb-run --auto-servernum"; else runner=""; fi
+          $runner node spikes/run-spike.mjs 08
+      - name: the e2e gate, nineteen checks against real windows
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then runner="xvfb-run --auto-servernum"; else runner=""; fi
+          $runner node scripts/run-electron.mjs packages/electron/test/native-e2e-app/main.mjs \
+            --report packages/electron/test/native-e2e-app/e2e-result.json
+      - name: window lifecycle chaos, sixty seconds
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then runner="xvfb-run --auto-servernum"; else runner=""; fi
+          $runner node scripts/run-electron.mjs packages/electron/test/native-chaos-app/main.mjs \
+            --report packages/electron/test/native-chaos-app/chaos-result.json --seconds 60
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-gates-${{ matrix.os }}-electron${{ matrix.electron }}
+          path: |
+            spikes/08-mmap-accessor/spike08-result.json
+            packages/electron/test/native-e2e-app/e2e-result.json
+            packages/electron/test/native-chaos-app/chaos-result.json
+
   canary-verdict:
     name: spike 01 verdict check against the Electron beta
     runs-on: ubuntu-latest
@@ -81,6 +133,16 @@ jobs:
             exit 1
           fi
           echo "the beta matches the record: FAIL"
+      - name: the native transport against the beta, failure here is the real warning
+        shell: bash
+        run: |
+          npm run build:native
+          npm run build
+          cd spikes/08-mmap-accessor && npx node-gyp rebuild && cd ../..
+          xvfb-run --auto-servernum node spikes/run-spike.mjs 08
+          xvfb-run --auto-servernum node scripts/run-electron.mjs \
+            packages/electron/test/native-e2e-app/main.mjs \
+            --report packages/electron/test/native-e2e-app/e2e-result.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:

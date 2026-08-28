@@ -28,7 +28,8 @@
     "gate:chaos": "npm run build && node scripts/run-electron.mjs packages/electron/test/native-chaos-app/main.mjs --report packages/electron/test/native-chaos-app/chaos-result.json --seconds 20",
     "gate:example": "npm run build && node scripts/run-electron.mjs examples/native-multi-window/main.mjs",
     "gate:e2e": "npm run build && node scripts/run-electron.mjs packages/electron/test/native-e2e-app/main.mjs --report packages/electron/test/native-e2e-app/e2e-result.json",
-    "gate:docker": "docker build -f docker/gate.Dockerfile -t globals-gate . && docker run --rm --init --ipc=host globals-gate"
+    "gate:docker": "docker build -f docker/gate.Dockerfile -t globals-gate . && docker run --rm --init --ipc=host globals-gate",
+    "bench:native": "npm run build && node scripts/run-electron.mjs packages/electron/test/native-bench-app/main.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",

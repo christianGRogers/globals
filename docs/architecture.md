@@ -1,5 +1,14 @@
 # Architecture
 
+> **This page describes the topology the platform refused, and awaits its rewrite.**
+> Phase 0 measured the design below to its conclusion and [ADR 0003](adr/0003-native-transport.md)
+> replaced it: the owner lives in the main process, a Node-API addon maps one region into
+> every process, trusted windows read private copies synced under the region's slot
+> protocol, and sandboxed windows use the asynchronous tier. Until the rewrite lands
+> ([plan-native.md](plan-native.md), N4), the current shape is documented in
+> [the package README](../packages/electron/README.md). The body below is kept as the record
+> of the reasoning the gate tested.
+
 Two platform facts, both discoverable before writing a line of the library, dictate the
 topology. Neither is negotiable, and together they rule out the design most people would
 sketch first.
