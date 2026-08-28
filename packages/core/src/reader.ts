@@ -4,6 +4,7 @@ import { RetainedRing } from "./retained.js";
 import { Header } from "./layout.js";
 import { StaleSnapshotError } from "./errors.js";
 import { decodeValue, type Slot } from "./values.js";
+import { readPath, viewValue, type ViewContext } from "./view.js";
 
 /**
  * How many times a reader retries the seqlock before it gives up on acquiring a fresh
@@ -31,6 +32,7 @@ export class Snapshot {
   readonly #reader: ArenaReader;
   readonly #slot: Slot;
   #released = false;
+  #view: ViewContext | undefined;
 
   constructor(reader: ArenaReader, versionId: number, ownerGeneration: number, slot: Slot) {
     this.#reader = reader;
@@ -56,9 +58,52 @@ export class Snapshot {
    */
   get value(): unknown {
     this.validate();
+    const decoded = viewValue(this.#viewContext(), this.#slot);
+    this.validate();
+    return decoded;
+  }
+
+  /**
+   * The whole version as a detached plain value, with no proxies and no arena references.
+   *
+   * Use it to hand state to something that has to own it, such as a serialiser or a worker.
+   * It costs a full decode, which is exactly what the lazy path exists to avoid, so it is a
+   * deliberate call rather than the default.
+   */
+  toJSON(): unknown {
+    this.validate();
     const decoded = decodeValue(this.#reader.arena, this.#slot);
     this.validate();
     return decoded;
+  }
+
+  /**
+   * Read one path without building views for the nodes along it.
+   *
+   * The cheapest shape for a selector, and what the framework bindings use.
+   */
+  get(path: readonly (string | number)[]): unknown {
+    this.validate();
+    const value = readPath(this.#reader.arena, this.#slot, path);
+    this.validate();
+    return value;
+  }
+
+  /**
+   * The decode cache for this version.
+   *
+   * Built on first use and never shared with another version, so a reclaimed version cannot
+   * leave a decoded node reachable.
+   */
+  #viewContext(): ViewContext {
+    if (this.#view === undefined) {
+      this.#view = {
+        arena: this.#reader.arena,
+        validate: () => this.validate(),
+        cache: new Map<number, unknown>(),
+      };
+    }
+    return this.#view;
   }
 
   /** The root slot, for callers decoding lazily rather than eagerly. */

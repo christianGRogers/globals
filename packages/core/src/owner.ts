@@ -4,7 +4,9 @@ import { ReaderTable } from "./readers.js";
 import { RetainedRing } from "./retained.js";
 import { StringTable } from "./strings.js";
 import { Header, VerifyMode, type VerifyModeValue } from "./layout.js";
-import { encodeValue, retiredBlocks, type EncodeContext, type Slot } from "./values.js";
+import { collectBlocks, encodeValue, type EncodeContext, type Slot } from "./values.js";
+import { createDraft, finalizeState } from "./draft.js";
+import { Tag } from "./tags.js";
 import { GlobalsError } from "./errors.js";
 
 export interface OwnerOptions {
@@ -158,12 +160,7 @@ export class ArenaOwner {
    * sequence, spin briefly, and retry. The window is a handful of stores wide.
    */
   commit(value: unknown): number {
-    const context: EncodeContext = {
-      arena: this.arena,
-      allocator: this.#allocator,
-      strings: this.#strings,
-      allocated: [],
-    };
+    const context = this.#newContext();
 
     let slot: Slot;
     try {
@@ -175,16 +172,74 @@ export class ArenaOwner {
       throw error;
     }
 
-    const previousSlot = this.#currentSlot;
+    // A wholesale replacement shares nothing with the previous version, so everything the
+    // old root reached is garbage once that version is unreadable.
+    const retired = collectBlocks(this.arena, this.#currentSlot, context.retired);
+    return this.#install(slot, retired);
+  }
+
+  /**
+   * Apply a recipe to a draft of the current state and commit the result.
+   *
+   * This is the path that makes retention affordable. Only the paths the recipe touched are
+   * rebuilt, so setting one field of a large object copies a handful of nodes rather than
+   * the tree.
+   *
+   *     owner.update((draft) => {
+   *       draft.users[3].name = "new name";
+   *     });
+   */
+  update<T>(recipe: (draft: T) => void): number {
+    const context = this.#newContext();
+    const current = this.#currentSlot;
+
+    if (current.tag !== Tag.Object && current.tag !== Tag.Array) {
+      throw new GlobalsError(
+        "update needs an object or array root. Commit one first, or use commit to replace " +
+          "the root outright.",
+      );
+    }
+
+    let slot: Slot;
+    try {
+      const draft = createDraft(context, current);
+      recipe(draft.proxy as T);
+      slot = finalizeState(context, draft.state);
+    } catch (error) {
+      for (const offset of context.allocated) this.#allocator.free(offset);
+      throw error;
+    }
+
+    if (slot.tag === current.tag && slot.payload === current.payload) {
+      // The recipe changed nothing. Publishing a version anyway would wake every window for
+      // no reason.
+      return this.#versionId;
+    }
+
+    return this.#install(slot, context.retired);
+  }
+
+  #newContext(): EncodeContext {
+    return {
+      arena: this.arena,
+      allocator: this.#allocator,
+      strings: this.#strings,
+      allocated: [],
+      retired: [],
+    };
+  }
+
+  #install(slot: Slot, retired: number[]): number {
     const previousVersion = this.#versionId;
     const version = previousVersion + 1;
 
     this.#evictForVersion(version);
     this.#publish(version, slot);
 
-    if (previousVersion > 0) {
-      const retired = retiredBlocks(previousSlot);
-      if (retired.length > 0) this.#garbage.set(previousVersion, retired);
+    if (previousVersion > 0 && retired.length > 0) {
+      const existing = this.#garbage.get(previousVersion);
+      if (existing) existing.push(...retired);
+      else this.#garbage.set(previousVersion, retired);
     }
 
     this.#currentSlot = slot;

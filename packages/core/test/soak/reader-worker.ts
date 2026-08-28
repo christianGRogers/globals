@@ -2,7 +2,7 @@ import { parentPort, workerData } from "node:worker_threads";
 
 import { ArenaReader } from "../../src/reader.js";
 import { ArenaCorruptError, StaleSnapshotError } from "../../src/errors.js";
-import { expectedValueFor } from "./invariant.js";
+import { checkState } from "./invariant.js";
 
 interface WorkerInput {
   readonly buffer: SharedArrayBuffer;
@@ -65,10 +65,12 @@ let nextReportAt = Date.now() + input.reportEveryMs;
 function tick(): void {
   const deadline = Date.now() + 20;
   while (Date.now() < deadline && running) {
-    for (let i = 0; i < 500; i += 1) {
+    for (let i = 0; i < 50; i += 1) {
       try {
         const snapshot = reader.acquire();
-        const value = snapshot.value;
+        // toJSON walks the whole structure, which is the strongest check available: a
+        // partial decode could miss a torn subtree that the lazy path never touched.
+        const value = snapshot.toJSON();
         reads += 1;
 
         if (snapshot.versionId !== lastVersion) {
@@ -78,10 +80,14 @@ function tick(): void {
         }
 
         // The invariant: the committed value is a pure function of its version id, so any
-        // mismatch means the root tag, the root payload, and the version id were not read
-        // from the same commit.
-        const expected = expectedValueFor(snapshot.versionId);
-        if (!Object.is(value, expected)) inconsistentReads += 1;
+        // mismatch means the root and the version id were not read from the same commit.
+        const mismatch = checkState(snapshot.versionId, value);
+        if (mismatch !== undefined) {
+          inconsistentReads += 1;
+          lastError =
+            `version ${snapshot.versionId} field ${mismatch.field}: expected ` +
+            `${String(mismatch.expected)}, read ${String(mismatch.actual)}`;
+        }
       } catch (error) {
         if (error instanceof StaleSnapshotError) {
           staleSnapshots += 1;
