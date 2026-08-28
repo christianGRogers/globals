@@ -7,6 +7,7 @@ name: prebuilds
 # until then this workflow is the proof half of the N1 exit gate: the prebuild loads and
 # works on every cell.
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches: [dev]

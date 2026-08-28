@@ -13,6 +13,7 @@
   },
   "files": [
     "dist/src",
+    "native/prebuilds",
     "native/addon.c",
     "native/binding.gyp",
     "README.md"
