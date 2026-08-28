@@ -125,20 +125,27 @@ async function main() {
     }
   })();
 
+  const lastReportAt = new Map();
   ipcMain.on("chaos:stats", (_event, stats) => {
     statsByBoot.set(`${stats.window}#${stats.boot}`, stats);
+    lastReportAt.set(stats.window, Date.now());
   });
 
   const names = Array.from({ length: windowCount }, (_u, i) => `chaos-${i}`);
   const windows = new Map(names.map((name) => [name, makeWindow(name)]));
 
-  // The healing sweep. A one shot reload after a forced crash can race a second disruption
-  // and leave a window dead for the rest of the run, which Linux demonstrated on the first
-  // full matrix. The sweep reloads any window whose renderer is gone, and the verdict then
-  // measures recovery rather than scheduling luck.
+  // The healing sweep, keyed on report liveness rather than isCrashed(): Linux does not
+  // always register a forced crash, so a dead window can look healthy to every renderer
+  // state API while saying nothing. A window that has not reported for a while gets
+  // reloaded, whatever the platform thinks happened to it, and the verdict then measures
+  // recovery rather than scheduling luck.
+  const sweepStart = Date.now();
   const sweep = setInterval(() => {
-    for (const window of windows.values()) {
-      if (!window.isDestroyed() && window.webContents.isCrashed()) {
+    for (const [name, window] of windows) {
+      if (window.isDestroyed()) continue;
+      const seen = lastReportAt.get(name) ?? sweepStart;
+      if (Date.now() - seen > 2500) {
+        lastReportAt.set(name, Date.now());
         window.webContents.reload();
       }
     }
@@ -173,10 +180,11 @@ async function main() {
   }
 
   // Quiet period: the storm is over, the writer keeps going, and every window must find
-  // its way back to current before the verdict.
-  await sleep(3000);
-  const versionNearEnd = owner.version();
-  await sleep(1500);
+  // its way back before the verdict. Coming back means observing a version committed
+  // after the storm ended, which is a fact about recovery rather than about how fast the
+  // writer moved between two progress reports.
+  const versionAtQuietStart = owner.version();
+  await sleep(5000);
   clearInterval(sweep);
   writing = false;
   await writer;
@@ -200,8 +208,8 @@ async function main() {
       // slowly, and what must be impossible is the owner stopping, not the machine being
       // busy. Twenty per second across a storm is continuity.
       name: "the owner survived the storm and never stopped committing",
-      pass: versionNearEnd - versionAtStart > seconds * 20,
-      detail: `${versionNearEnd - versionAtStart} commits across the run`,
+      pass: versionAtQuietStart - versionAtStart > seconds * 20,
+      detail: `${versionAtQuietStart - versionAtStart} commits across the storm`,
     },
     {
       // rendererGone is recorded but not required: Linux does not reliably emit
@@ -226,12 +234,12 @@ async function main() {
       detail: `${regressions} regressions`,
     },
     {
-      name: "every window came back and was current at the end",
+      name: "every window came back and read past the storm",
       pass:
         latestByWindow.size === windowCount &&
-        [...latestByWindow.values()].every((b) => b.lastVersion >= versionNearEnd - 5),
+        [...latestByWindow.values()].every((b) => b.lastVersion >= versionAtQuietStart),
       detail: [...latestByWindow.values()]
-        .map((b) => `${b.window}#${b.boot} at ${b.lastVersion}/${versionNearEnd}`)
+        .map((b) => `${b.window}#${b.boot} at ${b.lastVersion}, quiet began at ${versionAtQuietStart}`)
         .join(", "),
     },
     {
