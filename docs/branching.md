@@ -55,7 +55,7 @@ are deleted, so the history of each phase stays inspectable.
 | `feature/n2-native-electron`, `feature/n2-native-chaos`, `feature/n2-delete-window-open` | N2 The rewire | Cleared: nineteen e2e checks and window lifecycle chaos green on real processes; the old machinery deleted. |
 | `feature/n3-native-matrix` | N3 Matrix, soak, benchmarks | Cleared: nineteen of nineteen matrix jobs green, Electron 31 to 33 across three platforms, plus the beta canary on the native route. |
 | `feature/n4-doc-rewrites` | N4 The claim | Docs rewritten. The external review of the trust model remains open, and is a 1.0 gate rather than a 0.2.0 one. |
-| `release/0.2.0` | The native transport release | Cut 2026-08-29. Awaits the recorded twenty four hour soak, then the owner's merge to main and tag. |
+| `release/0.2.0` | The native transport release | Shipped 2026-08-29 as @bradensbay/globals 0.2.0, ahead of the twenty four hour soak by the owner's decision; the soak completes after the fact and its recording lands in soak-results. |
 
 Gate status is tracked here rather than only in the plan, because a branch that merged is not
 the same as a gate that passed, and conflating the two is how a project convinces itself it is
