@@ -1,4 +1,4 @@
-# @globals/shm
+# @bradensbay/globals-shm
 
 The native transport: one file-backed shared memory region, an owning writer that
 alternates between two data slots, and reader copies that are always exactly one commit,
@@ -36,7 +36,7 @@ cannot sustain because it must complete a whole further commit first.
 ## Usage
 
 ```ts
-import { OwnerRegion, ReaderRegion } from "@globals/shm";
+import { OwnerRegion, ReaderRegion } from "@bradensbay/globals-shm";
 
 // The owning process, once:
 const owner = OwnerRegion.create(path, 1 << 20);

@@ -1,4 +1,4 @@
-# @globals/svelte
+# @bradensbay/globals-svelte
 
 The svelte binding for [Globals](https://github.com/christianGRogers/globals).
 

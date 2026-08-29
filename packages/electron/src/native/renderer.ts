@@ -8,7 +8,7 @@
  */
 import { ipcRenderer } from "electron";
 
-import type { ReadableStore, Snapshot } from "@globals/core";
+import type { ReadableStore, Snapshot } from "@bradensbay/globals-core";
 import { COMMIT, DISPATCH, HELLO, type Hello } from "./channel.js";
 import { NativeReaderSource } from "./reader-core.js";
 

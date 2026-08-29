@@ -1,6 +1,6 @@
 name: prebuilds
 
-# Builds the @globals/shm addon for every supported platform and architecture, smoke tests
+# Builds the @bradensbay/globals-shm addon for every supported platform and architecture, smoke tests
 # each binary on the machine that built it, and uploads the results as artifacts. Node-API
 # binaries are ABI stable, so one binary per platform-arch pair serves every supported Node
 # and Electron. The release workflow calls this and folds the artifacts into the published
@@ -54,7 +54,7 @@ jobs:
         # working directory to the member's root, and gyp then cannot find binding.gyp.
         run: |
           if [ -n "${{ matrix.target_arch }}" ]; then
-            npm run build:native --workspace @globals/shm -- --arch=${{ matrix.target_arch }}
+            npm run build:native --workspace @bradensbay/globals-shm -- --arch=${{ matrix.target_arch }}
           else
             npm run build:native
           fi

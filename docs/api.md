@@ -2,10 +2,10 @@
 
 Organised by the process the code runs in, because that is what decides what is available.
 
-## Main process, `@globals/electron`
+## Main process, `@bradensbay/globals`
 
 ```ts
-import { startNativeOwner, asyncPreloadPath, SnapshotStore } from "@globals/electron";
+import { startNativeOwner, asyncPreloadPath, SnapshotStore } from "@bradensbay/globals";
 ```
 
 | Export | Signature | Notes |
@@ -19,13 +19,13 @@ this process), `update(recipe)`, `dispatch(operation, payload)`, `version()`, `s
 and `close()`. `dispatch` and `update` resolve with the region version, the currency every
 reader deals in.
 
-## Trusted window preload, `@globals/electron/preload`
+## Trusted window preload, `@bradensbay/globals/preload`
 
 Runs in a preload with `sandbox: false` and context isolation on. The page never imports
 this; the preload decides what crosses the bridge.
 
 ```ts
-import { connectNative } from "@globals/electron/preload";
+import { connectNative } from "@bradensbay/globals/preload";
 ```
 
 `connectNative()` resolves to a `NativeConnection`:
@@ -52,10 +52,10 @@ Loaded by `asyncPreloadPath()`. There is no synchronous read on this tier at all
 | `ready` | `(): Promise<number>` | Resolves once the connection to the owner exists. |
 | `tier` | `"async"` | |
 
-## Transport, `@globals/shm`
+## Transport, `@bradensbay/globals-shm`
 
 ```ts
-import { OwnerRegion, ReaderRegion, LAYOUT_VERSION } from "@globals/shm";
+import { OwnerRegion, ReaderRegion, LAYOUT_VERSION } from "@bradensbay/globals-shm";
 ```
 
 | Export | Signature | Notes |
@@ -66,7 +66,7 @@ import { OwnerRegion, ReaderRegion, LAYOUT_VERSION } from "@globals/shm";
 | `ReaderRegion.prototype.sync` | `(dest) => number` | A copy that is exactly one commit, and the version it belongs to. |
 | `version` | `() => number` | One native call, the fast path before deciding to sync. |
 
-## Core, `@globals/core`
+## Core, `@bradensbay/globals-core`
 
 Most applications never import this directly. It is what the integration and the bindings are
 built on, and what to reach for when writing an integration for something other than Electron.
@@ -134,6 +134,6 @@ See [bindings.md](bindings.md). The short version:
 
 | Package | Read one path | Read a container | Hold a version |
 | --- | --- | --- | --- |
-| `@globals/react` | `usePath` | `useNodeSelector` | `usePinnedSnapshot` |
-| `@globals/vue` | `usePath` | `useNodeSelector` | `usePinnedSnapshot` |
-| `@globals/svelte` | `path` | `selectedNode` | `pinnedSnapshot` |
+| `@bradensbay/globals-react` | `usePath` | `useNodeSelector` | `usePinnedSnapshot` |
+| `@bradensbay/globals-vue` | `usePath` | `useNodeSelector` | `usePinnedSnapshot` |
+| `@bradensbay/globals-svelte` | `path` | `selectedNode` | `pinnedSnapshot` |

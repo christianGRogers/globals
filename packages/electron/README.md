@@ -1,4 +1,4 @@
-# @globals/electron
+# @bradensbay/globals
 
 The Electron integration for [Globals](https://github.com/christianGRogers/globals) over the
 native transport ([ADR 0003](../../docs/adr/0003-native-transport.md)): the owner is a plain
@@ -13,7 +13,7 @@ maps anything.
 ## Main process
 
 ```ts
-import { startNativeOwner } from "@globals/electron";
+import { startNativeOwner } from "@bradensbay/globals";
 
 const owner = await startNativeOwner({
   initial: { count: 0, rows: [] },
@@ -32,7 +32,7 @@ await owner.update((draft) => …);  // or writes it directly
 ## A trusted window's preload, with `sandbox: false`
 
 ```ts
-import { connectNative } from "@globals/electron/preload";
+import { connectNative } from "@bradensbay/globals/preload";
 
 const store = await connectNative();
 store.get();                        // synchronous, never stale, never torn
@@ -48,7 +48,7 @@ The [example application](../../examples/native-multi-window) shows the shape.
 
 ```ts
 // main process
-import { asyncPreloadPath } from "@globals/electron";
+import { asyncPreloadPath } from "@bradensbay/globals";
 new BrowserWindow({ webPreferences: { preload: asyncPreloadPath(), sandbox: true } });
 ```
 

@@ -14,13 +14,13 @@ route failed its gate finally, for the reason recorded in
 
 ### Added
 
-- `@globals/shm`: the native transport. One file backed region mapped by a Node-API addon,
+- `@bradensbay/globals-shm`: the native transport. One file backed region mapped by a Node-API addon,
   an owning writer double buffering between two data slots, per slot sequences and
   versions, and reader copies that are always exactly one commit. Readers map the region
   read only, enforced by the operating system. Typed failures, a layout version the
   attach refuses to misread, prebuilds for six platform and architecture pairs, and a
   cross process soak that runs an hour nightly.
-- `@globals/electron`, rebuilt over the transport: `startNativeOwner` in the main process
+- `@bradensbay/globals`, rebuilt over the transport: `startNativeOwner` in the main process
   with optional rehydrating persistence, `connectNative` for trusted preloads, the shipped
   `preload-async.cjs` and `asyncPreloadPath()` for windows that keep their sandbox, and
   commit notifications off the read path.
@@ -64,7 +64,7 @@ which [docs/stability.md](docs/stability.md) states rather than implies.
 - Repository scaffold, workspace layout, and branching model.
 - Continuous integration: build matrix, soak, Electron matrix, CodeQL, gated release.
 - Phase 0 feasibility spikes, with recorded results in `spikes/RESULTS.md`.
-- `@globals/core`: the shared memory arena, tagged value encoding for the scalar type
+- `@bradensbay/globals-core`: the shared memory arena, tagged value encoding for the scalar type
   ladder, a size class allocator over a bump region, interned strings, and epoch based
   reclamation with bounded retention.
 - The multi process soak harness, which gates every change to the arena.
@@ -77,7 +77,7 @@ which [docs/stability.md](docs/stability.md) states rather than implies.
   plus `snapshot.get(path)` and `snapshot.toJSON()`.
 - `OwnerStore` and `ReaderStore`, which separate reading from writing in the type system.
 - `ExternalTier`, the asynchronous escape hatch for values the ladder cannot encode.
-- `@globals/electron`: the hidden owner window, a privileged custom scheme that sets COOP
+- `@bradensbay/globals`: the hidden owner window, a privileged custom scheme that sets COOP
   and COEP on every response, the port handshake, named write operations, the per window
   shared or asynchronous tier split, and an asynchronous main process API.
 - `LivenessMonitor` in the core, which reaps the reader slot a crashed or frozen window
@@ -85,7 +85,7 @@ which [docs/stability.md](docs/stability.md) states rather than implies.
 - Persistence with debounced writes and temp file plus rename discipline.
 - A chaos harness that opens, reloads, freezes, and kills simulated windows while a writer
   runs, plus its Electron counterpart for the electron-matrix workflow.
-- `@globals/react`, `@globals/vue`, and `@globals/svelte`, all over the same subscribe
+- `@bradensbay/globals-react`, `@bradensbay/globals-vue`, and `@bradensbay/globals-svelte`, all over the same subscribe
   and snapshot pair, with node comparing selectors for container slices.
 - `defineSchema` and the typed store interfaces, which keep a synchronous read and an
   asynchronous write from looking alike at the call site.

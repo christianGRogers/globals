@@ -10,7 +10,7 @@ import {
   type InjectionKey,
   type ShallowRef,
 } from "vue";
-import { sameNode, type ReadableStore, type Snapshot } from "@globals/core";
+import { sameNode, type ReadableStore, type Snapshot } from "@bradensbay/globals-core";
 
 /**
  * The Vue adapter.

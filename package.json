@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
-    "build:native": "npm run build:native --workspace @globals/shm",
+    "build:native": "npm run build:native --workspace @bradensbay/globals-shm",
     "clean": "tsc --build tsconfig.build.json --clean",
     "typecheck": "tsc --build tsconfig.build.json --pretty",
     "test": "npm run build && node scripts/run-tests.mjs",

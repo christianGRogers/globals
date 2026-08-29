@@ -13,7 +13,7 @@ body:
     attributes:
       label: Versions
       description: Library version, Electron version, Node version, operating system and architecture
-      placeholder: "@globals/core 0.1.0, Electron 33.2.0, Node 20.18.0, macOS 15 arm64"
+      placeholder: "@bradensbay/globals-core 0.1.0, Electron 33.2.0, Node 20.18.0, macOS 15 arm64"
     validations:
       required: true
   - type: textarea
