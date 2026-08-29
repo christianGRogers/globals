@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>editor, shared tier</title>
+<style>
+  body { font: 13px/1.5 system-ui, sans-serif; margin: 1rem; }
+  h1 { font-size: 1rem; }
+  em { color: #666; }
+  label { display: block; margin: 0.6rem 0 0.2rem; }
+  input, button { font: inherit; padding: 2px 6px; }
+  #log { color: #444; white-space: pre-line; margin-top: 1rem; }
+</style>
+<body>
+<h1>editor <em>writes are intents; the line after a write still reads the old value</em></h1>
+<label>row <input id="row" type="number" value="3" min="0" max="199"></label>
+<label>value <input id="value" type="number" value="777"></label>
+<button id="apply">set value</button>
+<div id="log"></div>
+<script>
+  const log = (line) => {
+    document.getElementById("log").textContent = line + "\n" + document.getElementById("log").textContent;
+  };
+  document.getElementById("apply").addEventListener("click", async () => {
+    const row = Number(document.getElementById("row").value);
+    const value = Number(document.getElementById("value").value);
+    const before = window.store.select(["rows", row, "value"]);
+    const pending = window.store.dispatch("setValue", { row, value });
+    const onTheLineAfter = window.store.select(["rows", row, "value"]);
+    const version = await pending;
+    const afterAwait = window.store.select(["rows", row, "value"]);
+    log(
+      `row ${row}: was ${before}, still ${onTheLineAfter} on the line after the write, ` +
+        `${afterAwait} once version ${version} committed`,
+    );
+  });
+</script>

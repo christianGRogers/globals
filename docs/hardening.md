@@ -170,16 +170,18 @@ npm run bench            # the read latency harness
 
 ## What is still outstanding
 
-Stated here rather than left for a reader to discover.
+Stated here rather than left for a reader to discover. The measurements this section once
+waited on have since been made: the buffer sharing spikes ran, closed the web platform route
+for the reason recorded in [../spikes/RESULTS.md](../spikes/RESULTS.md), and the library now
+ships on the native transport of [adr/0003-native-transport.md](adr/0003-native-transport.md),
+whose e2e and window lifecycle chaos gates run and pass on real windows. What remains:
 
-- **The phase 0 buffer sharing spike has not been run on a machine with a display.** The
-  Electron integration is therefore written against a claim rather than a measurement. See
-  [../spikes/RESULTS.md](../spikes/RESULTS.md) for what was attempted and why it could not
-  complete.
-- **The Electron chaos harness has not been run** for the same reason. Its runtime agnostic
-  counterpart has, and passes.
-- **The twenty four hour soak the plan asks for has not been run.** The longest recorded run
-  is five minutes locally, with one hour nightly on three platforms in continuous
-  integration.
-- **No external reviewer has read this note.** The phase 5 exit criterion asks for one who
-  agrees it is honest about the tradeoff, and that has not happened.
+- **This note predates the native transport in places.** Its corruption analysis assumed
+  every window can write shared memory; on the native transport everyone but the owner maps
+  the region read only, and the binding threat moved to the sandbox trade the
+  [trust model](trust-model.md) now leads with. The full rewrite is tracked in
+  [plan-native.md](plan-native.md).
+- **The twenty four hour soak has not been run.** The longest recorded runs are one hour
+  nightly, arena and transport both, on three platforms in continuous integration.
+- **No external reviewer has read the trust model.** The 1.0 checklist asks for one who
+  agrees it is honest about the sandbox trade, and that has not happened.

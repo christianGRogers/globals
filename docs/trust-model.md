@@ -1,87 +1,75 @@
 # Trust model
 
-Read this before adopting the library. It describes a real weakening of the renderer
-sandbox that cannot be engineered away.
+Read this before adopting the library. The first sentence is the whole decision:
 
-## The property
+**A window that reads shared state synchronously runs without the Chromium sandbox.**
 
-A `SharedArrayBuffer` is writable by every process that holds it. There is no read only
-mapping and no per window permission on the bytes. Any window that maps the arena can write
-anywhere in the arena, including the header, the root pointer, the epoch table, and the
-allocator metadata.
+Everything else in this document is detail. If your application loads content you do not
+fully control into a window that needs synchronous shared reads, this library is the wrong
+tool, and no configuration below changes that.
 
-That partially undoes what `sandbox: true` buys you. The sandbox contains a compromised
-renderer inside its own process. It does not contain writes to memory that renderer legally
-holds.
+## What the sandbox was buying, and what giving it up means
 
-## Consequences, stated plainly
+With `sandbox: true`, a compromised renderer is contained: it holds no OS capabilities
+beyond what the broker grants, and an exploited page is a prisoner negotiating through IPC.
+With `sandbox: false`, a compromised renderer is a process running arbitrary native code as
+the user. Not "can corrupt the app's shared state", but "can read your files and open your
+sockets". That is the class of risk, stated at full strength.
 
-| A window mapping the arena can | Effect |
+Context isolation stays on and the page gets no Node access, so the everyday accident, page
+script reaching into Node, is still fenced. The sandbox is the defence against a
+compromised renderer, and that is the defence an arena window gives up. The preload, not the
+page, holds the transport; treat every arena window's content the way you treat your main
+process code, because a renderer exploit in it has similar reach.
+
+## What did NOT get weaker: shared state integrity
+
+The old design's central worry was that shared memory is writable by everyone who maps it.
+The native transport removed that property instead of documenting it. A window that attaches
+to the region maps it **read only, enforced by the operating system**, and every read it
+serves comes from a private copy taken under the region's slot protocol. Only the owner in
+the main process can write a byte of shared state.
+
+| A hostile or buggy arena window can | Effect on shared state |
 | --- | --- |
-| Write a garbage root pointer | Every reader sees a corrupt tree until the owner recommits |
-| Write a garbage value slot | Other windows read a wrong but well formed value |
-| Write a bad offset into a node | Decoders must fail closed, which is why every decode validates |
-| Clear its own epoch slot while reading | It observes a `StaleSnapshotError`, other windows are unaffected |
-| Hold an epoch slot forever | Retention grows to the cap, then the owner force advances |
-| Overwrite the allocator free region | The owner detects the header checksum mismatch and rebuilds |
+| Write to its mapping | It cannot. The mapping is read only; the OS faults the write |
+| Corrupt its own private copy | Its own reads go wrong; no other window notices |
+| Spam dispatches | The owner applies declared operations or rejects; rate limiting is the app's policy |
+| Crash mid read | Nothing. There is no cross process pinning to leak; its copies die with it |
 
-None of these escape the renderer process. All of them corrupt shared application state.
+The corruption threats the old model tabulated, garbage roots, wild offsets, poisoned epoch
+slots, are not mitigated here; they are unreachable. The decoder's fail closed validation
+and the verified read modes remain as defence in depth against owner side bugs, and
+`ArenaCorruptError` in the field still deserves investigation, but no window can be its
+cause through the region.
 
-## The three responses
+## The two tiers
 
-### 1. One trust domain, documented
+1. **The shared tier**, for windows that render only your own bundled UI. `sandbox: false`,
+   context isolation on, synchronous reads through the preload. One trust domain with the
+   main process: if you would not let the window's content run in Node, do not put it here.
+2. **The asynchronous tier**, for everything else. `sandbox: true`, the shipped
+   `preload-async.cjs`, reads by request, writes through the same intent path, and no
+   synchronous API exists in that window at all. A third party page, a plugin surface, a
+   documentation browser: they keep the full sandbox and never map anything.
 
-Every window that maps the arena is inside one trust domain. If you would not let a window
-call your privileged main process handlers directly, do not give it the arena.
+The tier is chosen per window by which preload the window gets, and nothing arrives by
+default: a window not wired to either tier has no access of any kind.
 
-### 2. Per window opt out
+## What remains your problem inside the shared tier
 
-A window created with `sharedTier: false` never receives the buffer. It gets the
-asynchronous replicated tier: reads are `await`ed, writes go through the same intent path,
-and the synchronous API is absent from its bundle rather than throwing at runtime.
-
-```ts
-createWindowStore(win, { sharedTier: false });
-```
-
-Use it for any window that renders content you do not control: a web view of a third party
-page, a plugin surface, a documentation browser.
-
-### 3. Verified read mode
-
-The owner publishes a checksum over the header and the current root with each commit. In
-verified mode a reader recomputes it before exposing a snapshot. This detects corruption by
-a buggy or hostile window that does not also forge the checksum. It does not stop a window
-that computes a valid checksum for corrupt data, because that window has the same
-information the owner does.
-
-Verified mode costs one pass over the header and root record per version, not per read.
-
-| Mode | Detects | Does not detect | Cost |
-| --- | --- | --- | --- |
-| `off` | Nothing | Everything | Zero |
-| `header` | Header and root corruption | Forged checksum, corrupt leaf values | One hash per version |
-| `full` | Any change to a retained version | Forged checksum | One hash per version over the reachable set |
-
-## What the design does mitigate
-
-- **Freed memory reads.** Epoch reclamation plus a validity check on every decode. A reader
-  pinned to a reclaimed version raises `StaleSnapshotError` rather than reading recycled
-  bytes.
-- **Bad offsets.** Every decode path bounds checks against the arena length and against the
-  record header of the node it is walking. A failure raises `ArenaCorruptError`.
-- **Unbounded pinning.** Liveness heartbeats plus a retention cap. A dead or frozen reader
-  is declared dead and its epoch slot is reclaimed.
-
-## What it does not mitigate
-
-- A window inside the trust domain deliberately writing wrong values.
-- A window inside the trust domain reading state it should not see. Everything in the arena
-  is visible to everything that maps the arena. Do not put per window secrets in it.
+- A window inside the trust domain can request any declared operation. Declare operations
+  narrowly; they are your privilege boundary, exactly like main process IPC handlers.
+- Everything in shared state is visible to every window on the shared tier. Put no
+  credentials, tokens, or per user secrets in it.
+- The sandbox trade compounds with everything else in the window: remote content, dev tools
+  exposure, extensions. An arena window should load your bundled files and nothing else.
 
 ## Guidance
 
-1. Put no credentials, tokens, or per user secrets in the shared tier.
-2. Give untrusted windows `sharedTier: false`.
-3. Turn on `header` verification in production. Turn on `full` when diagnosing corruption.
-4. Treat an `ArenaCorruptError` in the field as a security event, not only a bug.
+1. Ship arena windows only for UI you build and bundle. Everything else gets the
+   asynchronous tier.
+2. Put no secrets in shared state.
+3. Declare operations as narrowly as the UI allows; validate payloads in the owner.
+4. Treat an `ArenaCorruptError` in the field as a bug to chase, and remember the region
+   cannot be its source from a window: look at the owner's side.

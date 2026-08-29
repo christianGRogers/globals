@@ -1,9 +1,18 @@
 # @globals/shm
 
-The native transport: one file-backed shared memory region, an owning writer, and
-seqlock-consistent reader copies, through Node-API. This is the layer
-[ADR 0003](../../docs/adr/0003-native-transport.md) adopts, and the productionised
-descendant of [spike 08](../../spikes/08-mmap-accessor/README.md).
+The native transport: one file-backed shared memory region, an owning writer that
+alternates between two data slots, and reader copies that are always exactly one commit,
+through Node-API. This is the layer [ADR 0003](../../docs/adr/0003-native-transport.md)
+adopts, and the productionised descendant of
+[spike 08](../../spikes/08-mmap-accessor/README.md).
+
+The double buffering is load bearing, and the transport soak is why. A single-slot seqlock
+holds its lock for the whole flush copy, so a writer at full rate on a large region leaves
+stable windows barely longer than a reader's own copy, and a reader can retry into
+livelock; the soak caught exactly that. With two slots, the writer builds each commit in
+the slot the last commit did not publish, each slot carries its own sequence and version,
+and a reader's copy is torn only if the writer laps into the same slot mid copy, which it
+cannot sustain because it must complete a whole further commit first.
 
 ## The contract
 
@@ -11,7 +20,8 @@ descendant of [spike 08](../../spikes/08-mmap-accessor/README.md).
   flush. A flush copies the commit's dirty ranges from the owner's private mirror into the
   mapping inside one seqlock section and bumps the version.
 - **Readers copy, then decode.** `sync(dest)` produces a copy of the whole data region that
-  is one commit and never a torn mixture, and returns the version it belongs to. `version()`
+  is one commit and never a torn mixture, and returns the version it belongs to, which under
+  a fast writer may be newer than the version observed at the start of the call. `version()`
   is one native call, the fast path a caller checks before deciding to sync.
 - **Nothing outside this package touches shared memory.** No ArrayBuffer ever wraps the
   mapping, which is what keeps the V8 memory cage out of the picture. Every byte a caller

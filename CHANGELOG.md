@@ -6,6 +6,50 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-29
+
+The native transport ([ADR 0003](docs/adr/0003-native-transport.md)). The web platform
+route failed its gate finally, for the reason recorded in
+[spikes/RESULTS.md](spikes/RESULTS.md), and this release replaces it end to end.
+
+### Added
+
+- `@globals/shm`: the native transport. One file backed region mapped by a Node-API addon,
+  an owning writer double buffering between two data slots, per slot sequences and
+  versions, and reader copies that are always exactly one commit. Readers map the region
+  read only, enforced by the operating system. Typed failures, a layout version the
+  attach refuses to misread, prebuilds for six platform and architecture pairs, and a
+  cross process soak that runs an hour nightly.
+- `@globals/electron`, rebuilt over the transport: `startNativeOwner` in the main process
+  with optional rehydrating persistence, `connectNative` for trusted preloads, the shipped
+  `preload-async.cjs` and `asyncPreloadPath()` for windows that keep their sandbox, and
+  commit notifications off the read path.
+- The native end to end gate, nineteen checks against real windows in separate OS
+  processes asserted by pid; the window lifecycle chaos harness the old topology could not
+  survive, owner uninterrupted through reloads, renderer kills, and recreations; and the
+  native read latency benchmark, measuring what an application pays on each side of the
+  contextBridge.
+- Spikes 07 and 08, closing the web platform question and measuring the native answer.
+- The three window example application, two tiers on screen.
+
+### Changed
+
+- The trust model leads with the real trade: windows that read synchronously run with
+  `sandbox: false`. Shared state integrity got stronger, not weaker: only the owner can
+  write the region.
+- The `electron-matrix` workflow runs the native gates per Electron major and platform and
+  keeps spike 01 as a verdict change detector for the closed web route.
+- Reads that observe a fresh commit can never return a stale or torn state: one version
+  check per read, one region copy per commit observed.
+
+### Removed
+
+- The window.open machinery: the hidden owner window, the privileged scheme and its
+  isolation headers, the bootstrap handshake, the renderer port vocabulary, and the old
+  preload. Cross process epoch pinning and the liveness monitor are unnecessary in the new
+  topology; the core keeps them for the worker thread arrangement where shared decoding
+  still applies.
+
 ## [0.1.0] - 2026-08-28
 
 First pre-release. The contract, the arena, the object layer, the Electron integration, the
@@ -90,5 +134,6 @@ which [docs/stability.md](docs/stability.md) states rather than implies.
   the checksum was loaded after the seqlock window rather than inside it. It reported
   corruption that was not there at a rate of roughly fifty in eight hundred thousand reads.
 
-[Unreleased]: https://github.com/christianGRogers/globals/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/christianGRogers/globals/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/christianGRogers/globals/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/christianGRogers/globals/releases/tag/v0.1.0

@@ -41,9 +41,14 @@ jobs:
             exit 1
           fi
 
+  prebuild:
+    name: build the transport prebuilds
+    needs: verify
+    uses: ./.github/workflows/prebuilds.yml
+
   publish:
     name: publish to npm
-    needs: verify
+    needs: [verify, prebuild]
     runs-on: ubuntu-latest
     environment: npm
     steps:
@@ -55,6 +60,18 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run build
+      - name: fold the prebuilds into the transport package
+        uses: actions/download-artifact@v7
+        with:
+          pattern: prebuild-*
+          path: packages/shm/native/prebuilds
+          merge-multiple: true
+      - name: a release without every prebuild does not ship
+        run: |
+          ls -R packages/shm/native/prebuilds
+          for pair in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+            test -f "packages/shm/native/prebuilds/$pair/globals_shm.node" || { echo "missing $pair"; exit 1; }
+          done
       - name: publish every public workspace package
         run: npm publish --workspaces --access public --provenance
         env:

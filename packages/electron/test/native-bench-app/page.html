@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>native bench page</title>
+<body>
+<script>
+// The main world arm: the same select, paid for across the contextBridge, which is what an
+// application's page actually experiences with context isolation on.
+(() => {
+  const run = () => {
+    const samples = [];
+    for (let batch = 0; batch < 30; batch++) {
+      const t0 = performance.now();
+      for (let i = 0; i < 2000; i++) window.bench.select(["rows", i % 2000, "value"]);
+      samples.push(((performance.now() - t0) / 2000) * 1e6);
+    }
+    const sorted = samples.sort((a, b) => a - b);
+    const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+    window.bench.done({
+      name: "select, double, across contextBridge",
+      mean: sorted.reduce((sum, v) => sum + v, 0) / sorted.length,
+      p50: at(0.5),
+      p99: at(0.99),
+    });
+  };
+  // The preload connects asynchronously; wait for the bridge to be live.
+  const poll = setInterval(() => {
+    try {
+      window.bench.select(["tick"]);
+      clearInterval(poll);
+      run();
+    } catch {
+      /* not connected yet */
+    }
+  }, 50);
+})();
+</script>

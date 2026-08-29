@@ -1,6 +1,6 @@
 {
   "name": "@globals/svelte",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Svelte store adapter over the same subscribe and snapshot pair.",
   "type": "module",
   "main": "./dist/src/index.js",
@@ -11,10 +11,15 @@
       "import": "./dist/src/index.js"
     }
   },
-  "files": ["dist/src", "README.md"],
-  "engines": { "node": ">=20.11.0" },
+  "files": [
+    "dist/src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "dependencies": {
-    "@globals/core": "0.1.0"
+    "@globals/core": "0.2.0"
   },
   "peerDependencies": {
     "svelte": ">=4"

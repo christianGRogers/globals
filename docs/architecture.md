@@ -1,108 +1,107 @@
 # Architecture
 
-Two platform facts, both discoverable before writing a line of the library, dictate the
-topology. Neither is negotiable, and together they rule out the design most people would
-sketch first.
+Two facts dictated the original topology, and a third, measured the hard way, replaced it.
+This page describes the shape that ships; the full record of the shape the platform refused
+is in [adr/0002-window-open-handshake.md](adr/0002-window-open-handshake.md) and
+[../spikes/RESULTS.md](../spikes/RESULTS.md), and the decision that replaced it is
+[adr/0003-native-transport.md](adr/0003-native-transport.md).
 
 ## Fact one: the V8 memory cage
 
-Since Electron 21, V8 refuses to treat memory outside its own cage as an `ArrayBuffer`
-backing store. The obvious native addon approach, which is to `mmap` a POSIX shared region,
-wrap it with `napi_create_external_arraybuffer`, and hand it to JavaScript, no longer
-shares. It copies. That closes the addon route for the shared region itself, in the
-renderer and in Node alike.
+Since Electron 21, every ArrayBuffer backing store must live inside V8's pointer compression
+cage. Memory that arrives from anywhere else, an mmap, a native allocation, another process,
+cannot be wrapped in an ArrayBuffer without a copy. This closed the obvious design, a native
+addon handing out views over shared memory, and spike 03 documents it.
 
-Spike `spikes/03-memory-cage` records the copy so the route is never revisited.
+The native transport does not fight the cage; it routes around it. No JavaScript ArrayBuffer
+ever wraps the shared mapping. The addon reads and writes the mapping only inside native
+calls, and every byte JavaScript decodes lives in a buffer V8 allocated. The cage is
+satisfied by construction rather than by exception.
 
-## Fact two: the Node main process is not a good sharing peer
+## Fact two: the web platform does not share memory across renderer processes
 
-Passing a `SharedArrayBuffer` from the Electron main process into a renderer is long
-requested and not dependably supported, and `MessagePortMain` has known gaps around
-transferables. Chromium by contrast already shares `SharedArrayBuffer` backing stores
-between cross origin isolated renderer processes. That path is load bearing production code
-inside the browser.
+The original design assumed a `SharedArrayBuffer` could reach every window over some
+platform channel. Phase 0 measured every channel and the answer is no, finally: the HTML
+agent cluster rule keeps shared memory inside one cluster, clusters never span the process
+boundary the design needed, and the one mechanism that carries the buffer puts every window
+in one process. No header, privilege, flag, or Electron version changes it.
 
-## The topology those facts force
+## The topology that ships
 
-The state owner is **not** the Node main process. It is a hidden `BrowserWindow`, a
-renderer like any other, which can therefore share memory with the visible windows on the
-supported path. The Node main process participates over ordinary asynchronous IPC, entirely
-off the read path.
-
-```text
-  Main process             Owner window              UI window A     UI window B
-  Node, outside the cage   hidden renderer           reader          reader
-  files, menus, quit       sole writer               sends intents   sends intents
-        |                  allocates the arena             |               |
-        |   async IPC      publishes roots                 |               |
-        +----------------->       |                       |               |
-                                  |                       |               |
-                          +-------+-----------------------+---------------+
-                          |
-      One SharedArrayBuffer, the same physical bytes in every renderer
-      header, epoch table, retained ring, string table, arena
+```
+main process                         renderer processes
++------------------------------+     +--------------------------------+
+| the owner                    |     | trusted window (sandbox off)   |
+|   core OwnerStore over a     |     |   preload: ReaderRegion,       |
+|   private buffer             |     |   version check per read,      |
+|   OwnerRegion.flush() per    |     |   copy on change, core decode  |
+|   commit                     |     |   page: whatever the preload   |
+|          |                   |     |   exposes over contextBridge   |
+|          v                   |     +--------------------------------+
+|   the region file, mapped    |<----  read only mapping, OS enforced
+|   read-write here only       |     +--------------------------------+
+|                              |     | sandboxed window (async tier)  |
+|   ipc: hello, dispatch,      |<--->|   preload-async.cjs: read by   |
+|   commit ping, async read    |     |   request, dispatch, ping      |
++------------------------------+     +--------------------------------+
 ```
 
-This inverts the usual Electron advice, and it is the single claim Phase 0 exists to prove
-or kill.
+- **The owner is the main process.** It runs the ordinary core `OwnerStore` over a private
+  buffer, exactly as the worker-thread topology uses it, and publishes each commit into the
+  mapped region under the region's slot protocol. There is no hidden window, no privileged
+  scheme, no isolation headers, and no handshake: the one thing a window needs from the main
+  process is the region's path.
+- **A trusted window maps the region read only** from its preload and never blocks on
+  anyone: one native version check per read, one seqlock-consistent copy per commit
+  observed, and the untouched core decoder over its own private buffer. A read can never
+  return a stale version and never a torn one.
+- **A sandboxed window maps nothing.** It reads by asking over IPC and hears the same commit
+  ping. The two tiers share the write path: every write is an intent the owner applies or
+  refuses.
+
+## Where the old design's hard problems went
+
+| Problem the old topology carried | What happened to it |
+| --- | --- |
+| Bootstrap handshake before first render | Deleted. The preload maps the file itself. |
+| COOP and COEP on every response | Deleted. Nothing needs cross origin isolation. |
+| Cross process epoch reclamation | Unnecessary. A reader's snapshot pins its own private buffer, and garbage collection is the whole story. |
+| Liveness monitoring and forced reclaim | Unnecessary here. A crashed reader leaks nothing shared. The core keeps both for the worker-thread arrangement, where shared decoding still applies. |
+| A hostile window corrupting shared state | Unreachable. Everyone but the owner maps the region read only, enforced by the OS. |
+| Exposure to Electron serializer internals | Gone. The surface is Node-API, which is ABI stable, and OS file mappings. |
+
+What replaced them is one trade, stated first everywhere it matters: a window that reads
+synchronously runs with `sandbox: false`. See [trust-model.md](trust-model.md).
+
+## The region protocol
+
+The region is double buffered: the owner builds every commit in the slot the previous commit
+did not publish, brings that slot up to date by copying the previous commit's ranges from
+the published slot, and publishes version and slot index as one atomic word. Each slot
+carries its own sequence, odd exactly while the writer is inside it, so a reader that copies
+a slot can prove the copy brackets no write. A reader retries only when the writer lapped
+into its slot mid copy, which the writer cannot sustain, because it must complete an entire
+further commit before touching the same slot again. The transport soak drove every part of
+this design; the history is in the `@globals/shm` package and its tests.
 
 ## Requirements to mechanisms
 
-Each of the four requirements maps to one mechanism and one specific way it can fail.
-
-### 1. Same memory
-
-A growable `SharedArrayBuffer` allocated by the owner window and handed to each renderer at
-bootstrap. It requires `crossOriginIsolated`, which means serving the application through a
-custom protocol that sets COOP and COEP.
-
-Principal risk: the transfer may not survive the hop with the sandbox on. This is the go or
-no go decision, and Phase 0 exists to make it.
-
-### 2. Real data
-
-Tagged eight byte slots over a byte arena. Small integers are inline, everything else is a
-32 bit offset. Key and string tables are interned. Persistent structures, a HAMT for objects
-and maps and a chunked vector for arrays, keep a one field write to a handful of copied
-nodes rather than the whole graph.
-
-Principal risk: the allocator plus reclamation is the largest single body of work and the
-easiest to get subtly wrong.
-
-### 3. Consistency
-
-Immutability plus an atomic root swap. The writer never mutates a published node. It builds
-a new version with structural sharing and atomically stores the new root. A reader that has
-loaded a root is traversing a graph that cannot change under it, so torn reads are
-impossible by construction rather than merely detected.
-
-Principal risk: this is only correct if the writer truly never mutates in place. That needs
-enforcement, not discipline.
-
-### 4. Non blocking
-
-Epoch based reclamation. A reader publishes its epoch with one atomic store, loads the root,
-reads freely, and publishes exit. The owner reclaims a version once every reader has moved
-past it. No reader ever waits. The seqlock retry survives only as a guard on the root and
-epoch handshake, with a bounded spin and a last good snapshot fallback.
-
-Principal risk: a reader that dies or freezes mid traversal pins memory forever. That needs
-liveness detection and fail closed decoding.
-
-### How 3 simplifies 4
-
-Because published data is immutable, the retry loop collapses to a single atomic load in the
-common case. The seqlock earns its keep only where the root pointer and the epoch table are
-updated together.
+| Requirement | Mechanism |
+| --- | --- |
+| Synchronous reads in a window | Preload-side private copy, refreshed on version change, decoded by the core |
+| A read never stale | One native version check on every read |
+| A read never torn | Per slot sequences bracket the copy; double buffering bounds the retry |
+| Writes serialized | One owner, in the main process, applying intents in order |
+| Windows learn of commits | A content free IPC ping, never on the read path |
+| Sandboxed windows still function | The asynchronous tier over the same intent path |
+| Crash of any window survivable | Real process isolation, and nothing shared to corrupt or pin |
+| Survives Electron majors | Node-API ABI stability; the matrix and the beta canary verify rather than assume |
 
 ## Package split
 
-The split exists so the core stays testable without Electron and reusable beyond it.
-
-| Package | Depends on | Contents |
-| --- | --- | --- |
-| `@globals/core` | Nothing | Arena, encoding, persistent structures, reclamation, snapshots |
-| `@globals/electron` | `@globals/core` and Electron | Owner window, protocol, handshake, lifecycle, persistence |
-| `@globals/react` | `@globals/core` | The `useSyncExternalStore` binding |
-| `@globals/vue` | `@globals/core` | Reactive adapter |
-| `@globals/svelte` | `@globals/core` | Store adapter |
+| Package | Role |
+| --- | --- |
+| `@globals/core` | Runtime agnostic: arena, encoding, persistent structures, reclamation for topologies that share decoding |
+| `@globals/shm` | The transport: the region file, the slot protocol, the addon, prebuilt per platform |
+| `@globals/electron` | The integration: the owner in the main process, the preload reader, the async tier, persistence |
+| `@globals/react`, `vue`, `svelte` | Bindings over the same subscribe and snapshot pair |

@@ -1,7 +1,7 @@
 {
   "name": "@globals/electron",
-  "version": "0.1.0",
-  "description": "Electron integration: the hidden owner window, the bootstrap handshake, window lifecycle, and persistence.",
+  "version": "0.2.0",
+  "description": "Electron integration over the native transport: the owner in the main process, preload-mapped regions for trusted windows, and the asynchronous tier for windows that keep their sandbox.",
   "type": "module",
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -10,34 +10,22 @@
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
     },
-    "./owner": {
-      "types": "./dist/src/owner.d.ts",
-      "import": "./dist/src/owner.js"
-    },
-    "./renderer": {
-      "types": "./dist/src/renderer.d.ts",
-      "import": "./dist/src/renderer.js"
-    },
-    "./native/owner": {
-      "types": "./dist/src/native/owner.d.ts",
-      "import": "./dist/src/native/owner.js"
-    },
-    "./native/renderer": {
+    "./preload": {
       "types": "./dist/src/native/renderer.d.ts",
       "import": "./dist/src/native/renderer.js"
     }
   },
   "files": [
     "dist/src",
-    "preload.cjs",
+    "preload-async.cjs",
     "README.md"
   ],
   "engines": {
     "node": ">=20.11.0"
   },
   "dependencies": {
-    "@globals/core": "0.1.0",
-    "@globals/shm": "0.1.0"
+    "@globals/core": "0.2.0",
+    "@globals/shm": "0.2.0"
   },
   "peerDependencies": {
     "electron": ">=28 <35"
