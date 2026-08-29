@@ -1,6 +1,6 @@
 {
   "name": "@globals/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Runtime agnostic shared memory arena: tagged value encoding, persistent data structures, epoch based reclamation.",
   "type": "module",
   "main": "./dist/src/index.js",
@@ -11,8 +11,13 @@
       "import": "./dist/src/index.js"
     }
   },
-  "files": ["dist/src", "README.md"],
-  "engines": { "node": ">=20.11.0" },
+  "files": [
+    "dist/src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "sideEffects": false,
   "license": "MIT",
   "repository": {

@@ -1,0 +1,9 @@
+soak: 8 readers, 86400s, 64 retained versions
+
+     10s  version 22802  reads 320449  live 48848B  bump 69704B
+     20s  version 45802  reads 683968  live 24656B  bump 69704B
+     30s  version 65602  reads 1040605  live 10320B  bump 69704B
+     40s  version 87602  reads 1420372  live 23760B  bump 69704B
+     50s  version 107202  reads 1760862  live 12112B  bump 69704B
+     60s  version 137002  reads 2198303  live 60496B  bump 69704B
+     70s  version 162202  reads 2624754  live 6736B  bump 69704B

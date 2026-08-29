@@ -6,6 +6,8 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-29
+
 The native transport ([ADR 0003](docs/adr/0003-native-transport.md)). The web platform
 route failed its gate finally, for the reason recorded in
 [spikes/RESULTS.md](spikes/RESULTS.md), and this release replaces it end to end.
@@ -132,5 +134,6 @@ which [docs/stability.md](docs/stability.md) states rather than implies.
   the checksum was loaded after the seqlock window rather than inside it. It reported
   corruption that was not there at a rate of roughly fifty in eight hundred thousand reads.
 
-[Unreleased]: https://github.com/christianGRogers/globals/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/christianGRogers/globals/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/christianGRogers/globals/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/christianGRogers/globals/releases/tag/v0.1.0
