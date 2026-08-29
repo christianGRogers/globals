@@ -1,4 +1,4 @@
-# @globals/react
+# @bradensbay/globals-react
 
 The react binding for [Globals](https://github.com/christianGRogers/globals).
 

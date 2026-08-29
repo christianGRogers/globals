@@ -42,8 +42,8 @@ upcoming major, so a change to any of these is a warning before it is a release 
 
 Semantic versioning, with two layout versions underneath it.
 
-**The arena layout** (`LAYOUT_VERSION` in `@globals/core`) and **the region layout**
-(`LAYOUT_VERSION` in `@globals/shm`) are each stored in their headers, and a reader refuses
+**The arena layout** (`LAYOUT_VERSION` in `@bradensbay/globals-core`) and **the region layout**
+(`LAYOUT_VERSION` in `@bradensbay/globals-shm`) are each stored in their headers, and a reader refuses
 to attach to a layout it does not understand. That matters because an owner and a reader can
 be different builds inside one application if a window is not reloaded across an update.
 Either layout changing is a major version change, never a patch.

@@ -21,7 +21,7 @@ That is fine in a console and wrong in a render loop.
 ## What is in the arena
 
 ```ts
-import { formatArena, reportArena } from "@globals/core";
+import { formatArena, reportArena } from "@bradensbay/globals-core";
 
 console.log(formatArena(owner));
 ```
@@ -60,7 +60,7 @@ globals arena, layout 1, owner generation 1
 ## What a window can see about itself
 
 ```ts
-import { reportReader } from "@globals/core";
+import { reportReader } from "@bradensbay/globals-core";
 
 reportReader(connection.reader);
 // { slot, generation, pinnedEpoch, publishedVersion, reclaimFloor,
@@ -85,7 +85,7 @@ it and there is no history to browse. A positive value keeps that many supersede
 readable, at the cost of holding their path copies. Turn it on in development.
 
 ```ts
-import { VersionHistory, diffShallow } from "@globals/core";
+import { VersionHistory, diffShallow } from "@bradensbay/globals-core";
 
 const history = new VersionHistory(reader);
 history.list();               // every retained version, oldest first

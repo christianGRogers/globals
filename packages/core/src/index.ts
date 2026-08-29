@@ -1,5 +1,5 @@
 /**
- * @globals/core
+ * @bradensbay/globals-core
  *
  * The runtime agnostic core: one shared memory arena, a tagged value encoding, persistent
  * data structures, an allocator, and epoch based reclamation. Nothing here imports Electron,

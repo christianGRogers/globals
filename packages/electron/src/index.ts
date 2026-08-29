@@ -1,5 +1,5 @@
 /**
- * @globals/electron
+ * @bradensbay/globals
  *
  * The Electron integration over the native transport. The owner is a plain object in the
  * main process; each window that shares memory maps the region file from its preload; a
@@ -10,8 +10,8 @@
  *
  * Two entry points, one per process side:
  *
- *   Main process   "@globals/electron"           startNativeOwner, asyncPreloadPath
- *   Preload        "@globals/electron/preload"   connectNative, for sandbox: false windows
+ *   Main process   "@bradensbay/globals"           startNativeOwner, asyncPreloadPath
+ *   Preload        "@bradensbay/globals/preload"   connectNative, for sandbox: false windows
  *
  * A sandboxed window loads the shipped preload-async.cjs (located by asyncPreloadPath) and
  * reads by asking; it never maps the region.

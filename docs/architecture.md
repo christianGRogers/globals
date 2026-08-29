@@ -82,7 +82,7 @@ carries its own sequence, odd exactly while the writer is inside it, so a reader
 a slot can prove the copy brackets no write. A reader retries only when the writer lapped
 into its slot mid copy, which the writer cannot sustain, because it must complete an entire
 further commit before touching the same slot again. The transport soak drove every part of
-this design; the history is in the `@globals/shm` package and its tests.
+this design; the history is in the `@bradensbay/globals-shm` package and its tests.
 
 ## Requirements to mechanisms
 
@@ -101,7 +101,7 @@ this design; the history is in the `@globals/shm` package and its tests.
 
 | Package | Role |
 | --- | --- |
-| `@globals/core` | Runtime agnostic: arena, encoding, persistent structures, reclamation for topologies that share decoding |
-| `@globals/shm` | The transport: the region file, the slot protocol, the addon, prebuilt per platform |
-| `@globals/electron` | The integration: the owner in the main process, the preload reader, the async tier, persistence |
-| `@globals/react`, `vue`, `svelte` | Bindings over the same subscribe and snapshot pair |
+| `@bradensbay/globals-core` | Runtime agnostic: arena, encoding, persistent structures, reclamation for topologies that share decoding |
+| `@bradensbay/globals-shm` | The transport: the region file, the slot protocol, the addon, prebuilt per platform |
+| `@bradensbay/globals` | The integration: the owner in the main process, the preload reader, the async tier, persistence |
+| `@bradensbay/globals-react`, `vue`, `svelte` | Bindings over the same subscribe and snapshot pair |

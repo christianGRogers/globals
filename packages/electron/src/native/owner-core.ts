@@ -13,8 +13,8 @@
  * rather than growing past what readers mapped. A growable region is future work with a
  * re-handshake, not a default.
  */
-import { OwnerStore, type OwnerOptions } from "@globals/core";
-import { OwnerRegion } from "@globals/shm";
+import { OwnerStore, type OwnerOptions } from "@bradensbay/globals-core";
+import { OwnerRegion } from "@bradensbay/globals-shm";
 
 import { SnapshotStore, type PersistenceOptions } from "../persistence.js";
 

@@ -46,7 +46,7 @@ function loadAddon(): NativeAddon {
     }
   }
   throw new Error(
-    `the @globals/shm native addon is not available for ${process.platform}-${process.arch}. Run: npm run build:native`,
+    `the @bradensbay/globals-shm native addon is not available for ${process.platform}-${process.arch}. Run: npm run build:native`,
     { cause },
   );
 }

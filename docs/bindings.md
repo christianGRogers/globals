@@ -6,7 +6,7 @@ thin on purpose, because the interesting work is below them.
 ## React
 
 ```tsx
-import { StoreProvider, useSelector, useNodeSelector, usePath } from "@globals/react";
+import { StoreProvider, useSelector, useNodeSelector, usePath } from "@bradensbay/globals-react";
 
 <StoreProvider store={connection}>
   <App />
@@ -34,7 +34,7 @@ state in every window.
 ## Vue
 
 ```ts
-import { installStore, usePath, useSelector } from "@globals/vue";
+import { installStore, usePath, useSelector } from "@bradensbay/globals-vue";
 
 installStore(app, connection);
 
@@ -49,7 +49,7 @@ decode every property to install tracking, which is the opposite of what a lazy 
 
 ```svelte
 <script>
-  import { path, selectedNode } from "@globals/svelte";
+  import { path, selectedNode } from "@bradensbay/globals-svelte";
   const title = path(store, ["title"]);
   const user = selectedNode(store, (state) => state.user);
 </script>

@@ -12,7 +12,7 @@ import { Worker } from "node:worker_threads";
 import { parseArgs } from "node:util";
 import { cpus, totalmem, platform, release, arch } from "node:os";
 
-import { ArenaOwner, ArenaReader } from "@globals/core";
+import { ArenaOwner, ArenaReader } from "@bradensbay/globals-core";
 
 interface Measurement {
   readonly label: string;

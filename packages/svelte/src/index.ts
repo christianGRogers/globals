@@ -1,4 +1,4 @@
-import { sameNode, type ReadableStore, type Snapshot } from "@globals/core";
+import { sameNode, type ReadableStore, type Snapshot } from "@bradensbay/globals-core";
 
 /**
  * The Svelte adapter.
