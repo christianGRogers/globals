@@ -1,220 +1,147 @@
 # Electron integration
 
-> **This page describes the removed window.open integration and awaits its rewrite.**
-> [ADR 0003](adr/0003-native-transport.md) replaced the topology below with the native
-> transport: the owner lives in the main process, trusted windows map the region from their
-> preloads, and sandboxed windows use the asynchronous tier. Until the rewrite lands
-> ([plan-native.md](plan-native.md), N4), the current API is documented in
-> [the package README](../packages/electron/README.md) and demonstrated by
-> [the example application](../examples/native-multi-window/README.md). The body below is
-> kept as the record of the design the gate closed.
-
-Three processes, three entry points, and one handshake. This page is what an application
-author needs; the reasoning behind the topology is in
-[architecture.md](architecture.md) and [ADR 0001](adr/0001-hidden-owner-window.md).
+What an application author needs, in the order the decisions arrive. The reasoning behind
+the topology is in [architecture.md](architecture.md); whether the trade is acceptable for
+your application is [trust-model.md](trust-model.md), and that page comes first.
 
 ## The shape
 
 | Process | Entry point | Role |
 | --- | --- | --- |
-| Main | `prepare()` at module scope, then `GlobalsHost.start()` | Broker. Creates the owner window, hands out ports, persists state. Never touches the arena. |
-| Hidden owner window | `startOwner()` | Sole writer. Allocates the arena, applies operations, publishes roots. |
-| Each UI window | `connect()` | Reader. Synchronous reads, asynchronous writes through intents. |
+| Main | `startNativeOwner()` | The owner. Creates the region, applies every write, persists, pings per commit. |
+| Trusted window preload, `sandbox: false` | `connectNative()` | Synchronous reads over a private copy; dispatch over IPC. |
+| Sandboxed window | `asyncPreloadPath()` as the preload | The asynchronous tier: reads by request, same write path. |
+
+There is no hidden owner window, no custom protocol, and no handshake. A window needs
+nothing before its first render except its preload, and the preload maps the region itself.
 
 ## Main process
 
 ```ts
 import { app, BrowserWindow } from "electron";
-import { GlobalsHost, prepare, preloadPath } from "@globals/electron";
+import { startNativeOwner, asyncPreloadPath } from "@globals/electron";
 
-// Must run at module scope, before the app is ready. Electron ignores a scheme registered
-// afterwards, and the symptom appears much later as a buffer that will not transfer.
-prepare();
+app.whenReady().then(async () => {
+  const owner = await startNativeOwner({
+    initial: { count: 0, rows: [] },
+    operations: {
+      // Every write any window can request is declared here, by name. Operations are the
+      // privilege boundary, exactly like your IPC handlers: validate payloads.
+      increment(draft, payload: { by: number }) {
+        draft.count += payload.by;
+      },
+    },
+    persistence: {},            // optional: rehydrate on boot, save commits under userData
+    byteLength: 1 << 20,        // region size, fixed for the region's life
+  });
 
-await app.whenReady();
-
-const host = await GlobalsHost.start({
-  root: join(import.meta.dirname, "renderer"),
-  ownerPage: "owner.html",
-  persistence: { file: join(app.getPath("userData"), "state.json") },
+  // The owner reads and writes its own store synchronously; main is not a second-class
+  // citizen in this topology.
+  owner.store.get();
+  await owner.update((draft) => { draft.count = 0; });
 });
+```
 
-const window = new BrowserWindow({
+`startNativeOwner` is asynchronous because persistence may rehydrate, and startup is the one
+place that wait belongs. The region file defaults to `globals.region` under `userData`;
+`persistence: {}` defaults its snapshot beside it. A full arena raises `ArenaFullError`
+rather than growing past what readers mapped: pick `byteLength` for your state with
+headroom.
+
+## A trusted window
+
+```ts
+new BrowserWindow({
   webPreferences: {
-    preload: preloadPath(),
+    preload: join(__dirname, "preload.mjs"),
+    sandbox: false,            // the trade the trust model leads with
+    contextIsolation: true,    // stays on; the page gets no Node access
+    nodeIntegration: false,
+  },
+});
+```
+
+The preload is an ES module (`.mjs`, Electron 28 and later, unsandboxed windows only):
+
+```ts
+// preload.mjs
+import { contextBridge } from "electron";
+import { connectNative } from "@globals/electron/preload";
+
+const store = await connectNative();
+
+contextBridge.exposeInMainWorld("app", {
+  // One crossing returns everything a render needs. A contextBridge call costs about a
+  // microsecond, so the decode layer lives here and the page API is per operation, never
+  // per property.
+  view: () => store.snapshot().toJSON(),
+  select: (path) => store.select(path),
+  dispatch: (operation, payload) => store.dispatch(operation, payload),
+  onCommit: (listener) => store.subscribe(listener),
+});
+```
+
+The contract on the page side is the library's contract: `select` and `view` are synchronous
+and can never observe a stale version or a torn one; `dispatch` resolves with the committed
+version, and the line after calling it still reads the old value.
+
+## A sandboxed window
+
+```ts
+import { asyncPreloadPath } from "@globals/electron";
+
+new BrowserWindow({
+  webPreferences: {
+    preload: asyncPreloadPath(),
     sandbox: true,
     contextIsolation: true,
+    nodeIntegration: false,
   },
 });
-
-host.attach(window, { name: "main-window" });
-await window.loadURL(host.url("index.html"));
 ```
 
-Reads from the main process are asynchronous and always will be. Node cannot map the arena,
-so `host.read()` is a round trip to the owner window. The types say so at the call site.
+The page receives `window.globalsAsync`: `read(path?)` resolving `{ version, value }`,
+`dispatch`, `subscribe`, `ready()`, and a `tier` of `"async"`. There is no synchronous read
+on this tier at all, deliberately: an API that pretended otherwise would blur the one
+distinction that matters. Use this tier for any window whose content you do not fully
+control, and for any window where the sandbox matters more than a 253 ns read.
 
-```ts
-const state = await host.read();
-await host.dispatch("increment", { by: 1 });
-```
+## Choosing tiers
 
-## The owner window
+The tier is the preload. Nothing arrives by default, and a window wired to neither has no
+access of any kind. The decision rule from the trust model: a window on the shared tier is
+one trust domain with your main process, so it renders only UI you build and bundle;
+everything else keeps its sandbox and asks.
 
-The owner page is an ordinary bundle you write. It runs in a hidden renderer with no Node
-access.
+## Subscriptions and rendering
 
-```ts
-import { startOwner } from "@globals/electron";
-
-const runtime = startOwner({
-  initial: { count: 0, users: [] },
-  operations: {
-    increment(draft, payload: { by: number }) {
-      draft.count += payload.by;
-    },
-    addUser(draft, payload: { name: string }) {
-      draft.users.push({ name: payload.name });
-    },
-  },
-  liveness: { intervalMs: 1000, missesBeforeDead: 5 },
-});
-```
-
-Operations are named because functions cannot cross a process boundary. A window sends the
-name of an operation and a payload, not a recipe. That has a second benefit worth stating:
-the complete set of writes a window can request is declared in one file, so the write surface
-is reviewable.
-
-The owner can also write directly, which is how a timer, a socket, or a background task in
-the owner window updates state:
-
-```ts
-runtime.update((draft) => { draft.count += 1; });
-```
-
-## A UI window
-
-```ts
-import { connect } from "@globals/electron/renderer";
-
-const store = await connect();
-
-if (store.tier === "shared") {
-  store.get();                       // synchronous, no await
-  store.select(["users", 0, "name"]); // one path, no intermediate objects
-}
-
-await store.dispatch("increment", { by: 1 });
-```
-
-`connect()` resolves once the window holds either the buffer or its first replicated value,
-so a first render reads real state rather than a placeholder. Call it before mounting.
-
-## The two tiers
-
-A window is on the shared tier or the asynchronous tier, and the API differs on purpose.
-
-| | Shared tier | Asynchronous tier |
-| --- | --- | --- |
-| Read | `store.get()`, synchronous | `await store.read()` |
-| Write | `await store.dispatch(...)` | `await store.dispatch(...)` |
-| Holds the buffer | Yes | No |
-| Can corrupt shared state | Yes | No |
-
-The read method has a different name in each tier. Code written against one does not
-silently compile against the other, so moving a window between tiers is a decision the
-compiler makes you acknowledge rather than a runtime surprise.
-
-Decide the tier in the owner:
-
-```ts
-startOwner({
-  asyncOnly: (name) => name.startsWith("untrusted-"),
-  // ...
-});
-```
-
-Give any window that renders content you do not control the asynchronous tier. See
-[trust-model.md](trust-model.md).
-
-## What the served root has to contain
-
-The mistake that produces a blank window. A page can only reach what the served root
-contains, and a specifier that climbs above it does not reach the filesystem above:
-
-```
-root:  app/renderer
-page:  app/renderer/index.html
-import "../../node_modules/some-package/dist/index.js"
-```
-
-The browser resolves that against the scheme origin before the request is made, so what
-arrives is `/node_modules/some-package/dist/index.js` with the climb already collapsed. It is
-served from `app/renderer/node_modules/...`, which does not exist, and the window loads
-nothing.
-
-Bundle the renderer and serve the bundle, which is what a real application does. If you serve
-unbundled sources, serve a root that contains everything they import.
-
-## The custom protocol
-
-`SharedArrayBuffer` transfers between renderers only when they are cross origin isolated,
-and a renderer is isolated only when its document carried COOP and COEP. Electron cannot set
-headers on `file://`, so the application has to be served through a scheme this library
-controls.
-
-This is the awkward part of adoption and there is no way around it that keeps the sandbox on.
-An application currently loading from `file://` has to move to the custom scheme first.
-
-A dev server is supported and is re-headed on the way through, so development does not
-silently lose isolation and leave the shared tier working only in production builds:
-
-```ts
-GlobalsHost.start({
-  root: join(import.meta.dirname, "renderer"),
-  ownerPage: "owner.html",
-  devServer: "http://localhost:5173",
-});
-```
+The owner sends one content free ping per commit. On the shared tier the ping only schedules
+rerenders; the read path never waits for it, and a read between ping and render is already
+current. Framework bindings sit on the same pair every tier exposes: subscribe, then read.
 
 ## Lifecycle
 
-| Event | What happens |
-| --- | --- |
-| Window opens | The host brokers a port pair, the owner sends the buffer, `connect()` resolves |
-| Window reloads | The renderer heap is discarded with its port. The window asks again on load, and the abandoned reader slot is reaped by the liveness detector |
-| Window closes | The reader detaches and its slot is released immediately |
-| Renderer crashes | The slot stays claimed and its epoch stays pinned. The liveness detector notices the stalled heartbeat and reclaims the slot, after which retention returns to normal |
-| Owner crashes | Every reader fails closed on the owner generation check. The host must restart the owner and rehydrate |
+- **Reload**: the preload runs again, maps again, syncs, and is current before first render.
+  Nothing needs cleaning up from the previous life; its buffers were private.
+- **Crash**: the window's copies die with it. Nothing shared is pinned, corrupted, or
+  leaked, and no other window notices. Recreate the window when you want it back.
+- **The owner**: lives exactly as long as the app. Persistence flushes on `before-quit`.
+- **Update across versions**: region and arena layouts are versioned; a reader from a
+  different build refuses a layout it does not understand rather than misreading it. See
+  [stability.md](stability.md).
 
-The liveness detector is deliberately patient: it declares a reader dead only after several
-consecutive samples in which a pinned reader failed to move its heartbeat. Reaping a merely
-slow reader costs it a `StaleSnapshotError` and a reacquire, which is recoverable but
-pointless.
+## Performance expectations
 
-## Persistence
+From [benchmarks.md](benchmarks.md), measured through this exact stack: a preload-side
+`select` of a double costs about 253 ns; the same call from the page across the bridge about
+873 ns; observing a fresh commit about 80 µs once per commit per window; a real
+`ipcRenderer.invoke` round trip 35 µs. Design the page API so renders cross the bridge once,
+and the bridge tax stays a rounding error.
 
-```ts
-GlobalsHost.start({
-  persistence: {
-    file: join(app.getPath("userData"), "state.json"),
-    debounceMs: 250,
-  },
-});
-```
+## What this page replaced
 
-Writes are debounced and coalesced, written to a temporary file beside the target, and moved
-into place with a rename. A crash mid write leaves either the old file or the new one, never
-half of either. The temp file sits in the same directory on purpose: a rename across
-filesystems is a copy, and a copy is not atomic.
-
-A pending write is flushed on `before-quit`, because the last commit before a quit is the one
-a user is most likely to notice missing.
-
-## What the gate still owes
-
-The buffer sharing spike has not yet been run on a machine with a display. Until it has, the
-Electron integration is written against a claim rather than a measurement. See
-[spikes/RESULTS.md](../spikes/RESULTS.md) for what was attempted and why it could not
-complete, and the `electron-matrix` workflow for where it runs properly.
+The integration this library shipped before ADR 0003, a hidden owner window, a privileged
+scheme serving isolation headers, and a `window.open` handshake, was deleted when the
+native transport landed. The record of that design and why the platform refused it is in
+[adr/0002-window-open-handshake.md](adr/0002-window-open-handshake.md) and
+[../spikes/RESULTS.md](../spikes/RESULTS.md).
