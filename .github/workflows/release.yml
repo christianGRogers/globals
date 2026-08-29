@@ -23,6 +23,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run build:native
       - run: npm run build
       - run: npm test
       - run: node scripts/check-docs.mjs
