@@ -42,14 +42,20 @@ are deleted, so the history of each phase stays inspectable.
 
 | Branch | Phase | Gate status |
 | --- | --- | --- |
-| `feature/p0-feasibility-spikes` | P0 Feasibility spikes | Partly cleared. Atomics and read latency measured and passing. Buffer sharing unproven: spike 01 could not run without a display. |
+| `feature/p0-feasibility-spikes` | P0 Feasibility spikes | Answered, finally: the gate FAILED for the reason in spikes/RESULTS.md, and spike 08 measured the route that replaced the design. |
 | `chore/ci-pipeline` | Continuous integration foundation | Cleared |
-| `feature/p1-arena` | P1 The arena | Cleared on a five minute soak. The plan asks for twenty four hours, which is a release gate. |
+| `feature/p1-arena` | P1 The arena | Cleared. The twenty four hour soak is a release gate and is recorded per release. |
 | `feature/p2-object-layer` | P2 The object layer | Cleared. Bounded write allocation asserted by test. |
-| `feature/p3-electron-integration` | P3 Electron integration | Half cleared. The runtime agnostic chaos harness passes. The Electron one has not run. |
+| `feature/p3-electron-integration` | P3 Electron integration | Superseded by the native transport; the window.open integration was deleted under ADR 0003. |
 | `feature/p4-bindings-dx` | P4 Bindings and developer experience | Deliverables complete. The gate asks for an application built by someone else from the docs alone, which has not happened. |
-| `feature/p5-hardening` | P5 Hardening | Two of three. Clean fuzz run and a written security note. No outside reviewer has read it, and the matrix has only run on one machine. |
-| `release/0.1.0` | P6 Release | Deliverables complete |
+| `feature/p5-hardening` | P5 Hardening | Fuzz clean, security note written and rewritten for the native transport. No outside reviewer has read it. |
+| `release/0.1.0` | P6 Release | Deliverables complete; never published. |
+| `feature/n0-land-the-gate-results` | N0 Land the measurements | Cleared |
+| `feature/n1-shm-transport` | N1 The transport package | Cleared: six platform prebuilds, cross process soak, layout two after the soak broke layout one. |
+| `feature/n2-native-electron`, `feature/n2-native-chaos`, `feature/n2-delete-window-open` | N2 The rewire | Cleared: nineteen e2e checks and window lifecycle chaos green on real processes; the old machinery deleted. |
+| `feature/n3-native-matrix` | N3 Matrix, soak, benchmarks | Cleared: nineteen of nineteen matrix jobs green, Electron 31 to 33 across three platforms, plus the beta canary on the native route. |
+| `feature/n4-doc-rewrites` | N4 The claim | Docs rewritten. The external review of the trust model remains open, and is a 1.0 gate rather than a 0.2.0 one. |
+| `release/0.2.0` | The native transport release | Cut 2026-08-29. Awaits the recorded twenty four hour soak, then the owner's merge to main and tag. |
 
 Gate status is tracked here rather than only in the plan, because a branch that merged is not
 the same as a gate that passed, and conflating the two is how a project convinces itself it is
