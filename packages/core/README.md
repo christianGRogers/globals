@@ -1,4 +1,4 @@
-# @globals/core
+# @bradensbay/globals-core
 
 The runtime agnostic core of [Globals](https://github.com/christianGRogers/globals): one
 shared memory arena, a tagged value encoding, an allocator, and epoch based reclamation.
@@ -14,7 +14,7 @@ Reads are synchronous. Writes are asynchronous. See
 ## Usage
 
 ```ts
-import { ArenaOwner, ArenaReader } from "@globals/core";
+import { ArenaOwner, ArenaReader } from "@bradensbay/globals-core";
 
 // In the owner, the only process that writes.
 const owner = ArenaOwner.create({ byteLength: 1 << 20 });

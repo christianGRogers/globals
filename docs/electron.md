@@ -19,7 +19,7 @@ nothing before its first render except its preload, and the preload maps the reg
 
 ```ts
 import { app, BrowserWindow } from "electron";
-import { startNativeOwner, asyncPreloadPath } from "@globals/electron";
+import { startNativeOwner, asyncPreloadPath } from "@bradensbay/globals";
 
 app.whenReady().then(async () => {
   const owner = await startNativeOwner({
@@ -66,7 +66,7 @@ The preload is an ES module (`.mjs`, Electron 28 and later, unsandboxed windows 
 ```ts
 // preload.mjs
 import { contextBridge } from "electron";
-import { connectNative } from "@globals/electron/preload";
+import { connectNative } from "@bradensbay/globals/preload";
 
 const store = await connectNative();
 
@@ -88,7 +88,7 @@ version, and the line after calling it still reads the old value.
 ## A sandboxed window
 
 ```ts
-import { asyncPreloadPath } from "@globals/electron";
+import { asyncPreloadPath } from "@bradensbay/globals";
 
 new BrowserWindow({
   webPreferences: {

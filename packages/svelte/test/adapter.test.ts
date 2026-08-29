@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { OwnerStore, ReaderStore } from "@globals/core";
+import { OwnerStore, ReaderStore } from "@bradensbay/globals-core";
 
 import { globalState, path, pinnedSnapshot, selected, selectedNode, version } from "../src/index.js";
 

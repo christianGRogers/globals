@@ -9,8 +9,8 @@
  * reads them, and ordinary garbage collection is the whole reclamation story. Nothing here
  * writes shared memory, and cross process epochs do not exist to manage.
  */
-import { ReaderStore, type ReadableStore, type Snapshot } from "@globals/core";
-import { ReaderRegion } from "@globals/shm";
+import { ReaderStore, type ReadableStore, type Snapshot } from "@bradensbay/globals-core";
+import { ReaderRegion } from "@bradensbay/globals-shm";
 
 export class NativeReaderSource implements ReadableStore {
   #region: ReaderRegion;

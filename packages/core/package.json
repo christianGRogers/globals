@@ -1,5 +1,5 @@
 {
-  "name": "@globals/core",
+  "name": "@bradensbay/globals-core",
   "version": "0.2.0",
   "description": "Runtime agnostic shared memory arena: tagged value encoding, persistent data structures, epoch based reclamation.",
   "type": "module",

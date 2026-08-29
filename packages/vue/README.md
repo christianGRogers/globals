@@ -1,4 +1,4 @@
-# @globals/vue
+# @bradensbay/globals-vue
 
 The vue binding for [Globals](https://github.com/christianGRogers/globals).
 

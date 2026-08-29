@@ -25,7 +25,7 @@ map the arena run with `sandbox: false`.
 
 ## N1 The transport package, 2 to 3 weeks
 
-`@globals/shm` (working name), the productionised descendant of the spike addon. Runtime
+`@bradensbay/globals-shm` (working name), the productionised descendant of the spike addon. Runtime
 agnostic like the core: testable in plain Node with **child processes**, which is a real
 process boundary, so no Electron is needed to prove the hard part.
 
