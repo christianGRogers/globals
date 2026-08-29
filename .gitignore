@@ -19,3 +19,4 @@ spikes/*/spike0*-result.json
 packages/electron/test/native-e2e-app/e2e-result.json
 packages/electron/test/native-chaos-app/chaos-result.json
 packages/electron/test/native-bench-app/bench-result.json
+soak-results/*.log
