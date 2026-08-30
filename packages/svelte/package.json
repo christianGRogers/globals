@@ -1,6 +1,6 @@
 {
   "name": "@bradensbay/globals-svelte",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Svelte store adapter over the same subscribe and snapshot pair.",
   "type": "module",
   "main": "./dist/src/index.js",
@@ -19,7 +19,7 @@
     "node": ">=20.11.0"
   },
   "dependencies": {
-    "@bradensbay/globals-core": "0.2.0"
+    "@bradensbay/globals-core": "0.2.1"
   },
   "peerDependencies": {
     "svelte": ">=4"

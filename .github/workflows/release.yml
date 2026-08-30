@@ -34,13 +34,13 @@ jobs:
             echo "tag is not an ancestor of main, refusing to publish"
             exit 1
           fi
-      - name: the tag must match the core package version
-        run: |
-          version=$(node -p "require('./packages/core/package.json').version")
-          if [ "v$version" != "${{ github.ref_name }}" ]; then
-            echo "tag ${{ github.ref_name }} does not match package version v$version"
-            exit 1
-          fi
+      # Checks the tag against every package, not just core, and checks the internal pins
+      # with it. A release that bumps the six versions but misses the five exact
+      # cross-package pins publishes without complaint and then resolves
+      # @bradensbay/globals against the previous globals-core. Runnable locally, which is
+      # the point: this is the second tag to learn a precondition the hard way.
+      - name: the tag, the versions, and the internal pins must agree
+        run: node scripts/check-release.mjs "${{ github.ref_name }}"
 
   prebuild:
     name: build the transport prebuilds
