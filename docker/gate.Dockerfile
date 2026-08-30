@@ -45,11 +45,17 @@ COPY packages/svelte/package.json ./packages/svelte/
 
 RUN npm ci
 
+# Electron no longer unpacks its binary during npm install; it materialises on the first
+# require. Resolving it here puts it on disk while this image is still root, which is the
+# only point at which the sandbox helper below can be configured.
+RUN node -e "import('electron').then((m) => console.log(m.default))"
+
 # Chromium's setuid sandbox has to be owned by root and setuid to work. npm install cannot
 # do this, so an Electron installed from npm always needs it done afterwards. Without it the
 # renderer refuses to start and the only way forward looks like --no-sandbox, which would
 # make the gate meaningless.
-RUN chown root:root node_modules/electron/dist/chrome-sandbox \
+RUN test -e node_modules/electron/dist/chrome-sandbox \
+  && chown root:root node_modules/electron/dist/chrome-sandbox \
   && chmod 4755 node_modules/electron/dist/chrome-sandbox
 
 COPY . .
