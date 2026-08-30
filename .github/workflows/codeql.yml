@@ -1,5 +1,13 @@
 name: codeql
 
+# Two languages, because the TypeScript in this repository cannot corrupt memory and
+# packages/shm/native/addon.c can. Analysing only the half that is memory safe was the
+# gap: the addon does its own pointer arithmetic over a mapped region, and it is the one
+# file where a missing bound is not a typed error.
+#
+# The C analysis needs the compiler to run under observation, so that job builds the addon
+# between init and analyze. The JavaScript analysis needs no build at all.
+
 on:
   push:
     branches: [dev, main]
@@ -10,16 +18,41 @@ on:
 
 permissions:
   contents: read
+  actions: read
   security-events: write
 
 jobs:
   analyze:
-    name: analyze javascript
+    name: analyze ${{ matrix.language }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: c-cpp
+            build-mode: manual
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        if: matrix.build-mode == 'manual'
+        with:
+          node-version: 22
+          cache: npm
       - uses: github/codeql-action/init@v3
         with:
-          languages: javascript-typescript
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
           queries: security-and-quality
+      - name: build the addon where CodeQL can watch the compiler
+        if: matrix.build-mode == 'manual'
+        env:
+          # The Electron binary is not needed to compile a Node-API addon, and downloading
+          # it here would cost minutes for nothing.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci
+          npm run build:native
       - uses: github/codeql-action/analyze@v3
