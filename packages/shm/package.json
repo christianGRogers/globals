@@ -1,6 +1,6 @@
 {
   "name": "@bradensbay/globals-shm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The native transport: one file-backed shared memory region, a double-buffered owning writer, and reader copies that are always exactly one commit, through Node-API so the V8 memory cage is never involved.",
   "type": "module",
   "main": "./dist/src/index.js",

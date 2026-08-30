@@ -6,6 +6,26 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-30
+
+A packaging release. No runtime code changed in any published package: the one line that
+reaches users is the Electron peer range, and it was blocking installs.
+
+### Fixed
+
+- `@bradensbay/globals` accepts Electron 42, 43, and 44. The peer range stopped at 34, so
+  every Electron that Electron itself still supports failed to resolve, and npm treats an
+  unsatisfiable peer range as an error rather than a warning. The native gates now run on
+  42, 43, and 44 across Linux, macOS, and Windows, nineteen of nineteen green, and the
+  transport needed no change to get there: Node-API is ABI stable, as
+  [stability.md](docs/stability.md) said it was.
+
+### Changed
+
+- The supported Electron range tracks whichever majors Electron supports, which is always
+  the latest three, and the peer bound moves with the matrix in the same change.
+  [stability.md](docs/stability.md) states the policy so the two cannot drift apart again.
+
 ## [0.2.0] - 2026-08-29
 
 The native transport ([ADR 0003](docs/adr/0003-native-transport.md)). The web platform
