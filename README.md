@@ -119,8 +119,8 @@ design shipped; the record, including process ids, is in
 synchronous decoded read in the preload is 253 ns against a 35 µs real `ipcRenderer.invoke`
 round trip, 138 times faster. Across the contextBridge a page pays 873 ns, still 40 times
 faster and synchronous. Observing a fresh commit costs about 80 µs, once per commit per
-window. Continuous integration holds this on Electron 31 through 33 across all three
-platforms, plus a canary on the beta.
+window. Continuous integration holds this on Electron 42 through 44 across all three
+platforms, plus a canary on the newest prerelease.
 
 ## Documentation
 

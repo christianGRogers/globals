@@ -28,7 +28,7 @@
     "@bradensbay/globals-shm": "0.2.0"
   },
   "peerDependencies": {
-    "electron": ">=28 <35"
+    "electron": ">=28 <45"
   },
   "sideEffects": false,
   "license": "MIT",

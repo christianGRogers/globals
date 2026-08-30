@@ -153,7 +153,7 @@ This library is unusually exposed to Electron internals, so the matrix is not op
 | Operating system | Linux, macOS, Windows |
 | Architecture | x64 on all three, arm64 on macOS runners |
 | Node | 20 and 22 |
-| Electron | 31, 32, 33, plus a beta canary that warns rather than breaks |
+| Electron | 42, 43, 44, plus a canary on the newest prerelease that warns rather than breaks |
 
 The core has no Electron dependency, so its matrix is about the arena behaving identically on
 three memory models. The Electron matrix is separate, slower, and scheduled.

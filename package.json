@@ -11,7 +11,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.build.json",
+    "build": "node scripts/prune-dist.mjs && tsc --build tsconfig.build.json",
     "build:native": "npm run build:native --workspace @bradensbay/globals-shm",
     "clean": "tsc --build tsconfig.build.json --clean",
     "typecheck": "tsc --build tsconfig.build.json --pretty",
@@ -34,7 +34,7 @@
   "devDependencies": {
     "@types/node": "^26.3.0",
     "@types/react": "^19.2.18",
-    "electron": "^33.4.11",
+    "electron": "^44.0.0",
     "node-gyp": "^12.4.0",
     "react": "^19.2.8",
     "svelte": "^5.56.10",

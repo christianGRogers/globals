@@ -36,7 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        electron: ["31", "32", "33"]
+        electron: ["42", "43", "44"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -84,7 +84,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        electron: ["31", "32", "33"]
+        electron: ["42", "43", "44"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -134,7 +134,7 @@ jobs:
             packages/electron/test/native-chaos-app/chaos-result.json
 
   canary-verdict:
-    name: spike 01 verdict check against the Electron beta
+    name: spike 01 verdict check against the newest Electron prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -145,9 +145,19 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # The beta exceeds the workspace's declared peer range on purpose; that is what makes
-      # it a canary.
-      - run: npm install --no-save --legacy-peer-deps electron@beta
+      # The prerelease exceeds the workspace's declared peer range on purpose; that is what
+      # makes it a canary. It is resolved rather than named, because `electron@beta` is not
+      # reliably ahead of the matrix: between a major going stable and the next major's betas
+      # opening, that tag still points at a prerelease of the version that already shipped,
+      # and a canary running behind the matrix is worse than no canary. See the script.
+      - name: resolve the newest Electron prerelease
+        id: canary
+        shell: bash
+        run: |
+          version=$(node scripts/newest-electron.mjs)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "the canary runs against electron@$version"
+      - run: npm install --no-save --legacy-peer-deps electron@${{ steps.canary.outputs.version }}
       - name: configure the SUID sandbox helper the Linux image requires
         if: runner.os == 'Linux'
         run: |
@@ -159,20 +169,20 @@ jobs:
           fi
       - name: the earliest signal available that the answer changed
         shell: bash
-        # The helper is configured here rather than in its own step, because the beta's
-        # binary can land after the install step returns and a fix that ran too early
-        # fixed nothing.
+        # The helper is configured here rather than in its own step, because the
+        # prerelease's binary can land after the install step returns and a fix that ran
+        # too early fixed nothing.
         run: |
           if [ -e node_modules/electron/dist/chrome-sandbox ]; then
             sudo chown root:root node_modules/electron/dist/chrome-sandbox
             sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           fi
           if xvfb-run --auto-servernum node spikes/run-spike.mjs 01; then
-            echo "::warning::spike 01 PASSED on the Electron beta. The next major may change the recorded answer."
+            echo "::warning::spike 01 PASSED on electron@${{ steps.canary.outputs.version }}. The next major may change the recorded answer."
             exit 1
           fi
-          echo "the beta matches the record: FAIL"
-      - name: the native transport against the beta, failure here is the real warning
+          echo "the prerelease matches the record: FAIL"
+      - name: the native transport against the prerelease, failure here is the real warning
         shell: bash
         run: |
           if [ -e node_modules/electron/dist/chrome-sandbox ]; then
