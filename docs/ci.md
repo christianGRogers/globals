@@ -6,8 +6,8 @@
 | --- | --- | --- |
 | `ci` | Every push and pull request | Native addon build, typecheck, tests, documentation checks, the Node runnable spikes, and short soak, chaos, fuzz, and transport soak runs |
 | `soak` | Nightly at 03:00 UTC and on demand | The long arena soak, chaos, fuzz, and the hour long transport soak across real processes |
-| `electron-matrix` | Weekly, on demand, and on transport or integration changes | The native gates, spike 08, the e2e app, and window lifecycle chaos, per Electron major and platform; spike 01 as a verdict change detector; a beta canary for both |
-| `codeql` | Push, pull request, weekly | Static analysis |
+| `electron-matrix` | Weekly, on demand, and on transport or integration changes | The native gates, spike 08, the e2e app, and window lifecycle chaos, per Electron major and platform; spike 01 as a verdict change detector; a canary on the newest prerelease for both |
+| `codeql` | Push, pull request, weekly | Static analysis, JavaScript and the native addon's C |
 | `release` | A `v*` tag | Verifies the tag sits on `main` and matches the package version, then publishes |
 | `prebuilds` | Transport native changes on `dev`, and on demand | Builds and smoke tests the addon on all six platform and architecture pairs |
 

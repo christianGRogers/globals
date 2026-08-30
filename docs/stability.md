@@ -34,9 +34,14 @@ upcoming major, so a change to any of these is a warning before it is a release 
 | Electron | Status |
 | --- | --- |
 | 27 and earlier | Not supported. ES modules in the main process arrived in 28. |
-| 28 to 30 | Expected to work, not covered by continuous integration |
-| 31, 32, 33 | Covered by the native gates in the `electron-matrix` workflow |
-| Beta | Run as a canary that warns rather than breaks |
+| 28 to 41 | Expected to work, not covered by continuous integration |
+| 42, 43, 44 | Covered by the native gates in the `electron-matrix` workflow |
+| Newest prerelease | Run as a canary that warns rather than breaks |
+
+The gated three are whichever majors Electron itself supports, which is always the latest
+three. When Electron ships a major, the matrix moves up and the peer range's upper bound
+moves with it, in the same change. Older majors are not dropped from the peer range,
+because nothing is known to have broken on them; they simply stop being proven.
 
 ## Versioning
 
