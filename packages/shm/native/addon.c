@@ -55,13 +55,24 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
 #define SHM_MAGIC 0x314d5347u /* "GSM1" read as little endian bytes G S M 1 */
 #define SHM_LAYOUT_VERSION 2u
 #define HEADER_BYTES 64u
-#define SYNC_RETRY_CAP 50000000u
+/* A ceiling on the declared data size, so HEADER_BYTES + 2 * data_size cannot wrap and a
+ * corrupt header cannot ask for a mapping that the slot arithmetic would then address
+ * outside. A terabyte per slot is far past any use this transport has, and far below the
+ * point where the sum overflows. */
+#define MAX_DATA_SIZE (1ull << 40)
+/* sync spins against a deadline rather than an attempt count. The count it used to carry
+ * was a real bound, but a bound on the wrong quantity: it sits on a synchronous call inside
+ * a preload, so fifty million attempts meant a window frozen for minutes before the error
+ * arrived. Attempts between clock reads keep the check off the fast path. */
+#define SYNC_DEADLINE_MS 2000u
+#define SYNC_ATTEMPTS_PER_CLOCK_CHECK 256u
 
 #define OFF_MAGIC 0u
 #define OFF_LAYOUT 4u
@@ -72,9 +83,12 @@ typedef struct {
   volatile uint8_t* map;
   uint64_t data_size;
   int owner;
-  /* The previous commit's ranges, owner side only: offset,length pairs. */
+  /* The previous commit's ranges, owner side only: offset,length pairs. Capacity is
+   * tracked apart from the count, because comparing against the last stored count made an
+   * alternating large and small commit pattern reallocate on nearly every flush. */
   uint32_t* prev_ranges;
   size_t prev_pairs;
+  size_t prev_capacity_pairs;
 #ifdef _WIN32
   HANDLE mapping;
 #else
@@ -114,6 +128,7 @@ static uint64_t load_word(const Region* r) { return load_u64(WORD_PTR(r)); }
 static void store_word(Region* r, uint64_t v) { store_u64(WORD_PTR(r), v); }
 static void fence(void) { MemoryBarrier(); }
 static void yield_cpu(void) { SwitchToThread(); }
+static uint64_t now_ms(void) { return (uint64_t)GetTickCount64(); }
 #else
 static uint64_t load_word(const Region* r) {
   return __atomic_load_n(WORD_PTR(r), __ATOMIC_ACQUIRE);
@@ -127,6 +142,11 @@ static uint64_t load_u64(volatile uint64_t* p) { return __atomic_load_n(p, __ATO
 static void store_u64(volatile uint64_t* p, uint64_t v) { __atomic_store_n(p, v, __ATOMIC_RELEASE); }
 static void fence(void) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
 static void yield_cpu(void) { sched_yield(); }
+static uint64_t now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)(ts.tv_nsec / 1000000);
+}
 #endif
 
 static napi_value fail(napi_env env, const char* code, const char* message) {
@@ -134,22 +154,34 @@ static napi_value fail(napi_env env, const char* code, const char* message) {
   return NULL;
 }
 
+/* Each handle is released independently. Nesting the descriptor and the mapping handle
+ * inside the "is it mapped" test leaked them whenever open succeeded and mmap did not,
+ * which was unreachable while every such failure returned directly, and is reachable now
+ * that opening funnels its failures through here. */
 static void region_release(Region* r) {
   if (r->map != NULL) {
 #ifdef _WIN32
     UnmapViewOfFile((void*)r->map);
-    if (r->mapping != NULL) CloseHandle(r->mapping);
-    r->mapping = NULL;
 #else
     munmap((void*)r->map, MAP_BYTES(r));
-    if (r->fd >= 0) close(r->fd);
-    r->fd = -1;
 #endif
     r->map = NULL;
   }
+#ifdef _WIN32
+  if (r->mapping != NULL) {
+    CloseHandle(r->mapping);
+    r->mapping = NULL;
+  }
+#else
+  if (r->fd >= 0) {
+    close(r->fd);
+    r->fd = -1;
+  }
+#endif
   free(r->prev_ranges);
   r->prev_ranges = NULL;
   r->prev_pairs = 0;
+  r->prev_capacity_pairs = 0;
 }
 
 static void finalize_region(napi_env env, void* data, void* hint) {
@@ -190,42 +222,75 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
   napi_value argv[2];
   napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
 
-  char path[2048];
+  /* The length is asked for first. napi_get_value_string_utf8 returns napi_ok when the
+   * buffer is too small, having silently truncated, so a fixed buffer used directly turns
+   * an over-long path into a different path that may well open. */
   size_t path_len = 0;
-  if (napi_get_value_string_utf8(env, argv[0], path, sizeof(path), &path_len) != napi_ok) {
+  if (napi_get_value_string_utf8(env, argv[0], NULL, 0, &path_len) != napi_ok) {
+    return fail(env, "ESHM_ARG", "path must be a string");
+  }
+  char* path = (char*)malloc(path_len + 1);
+  if (path == NULL) return fail(env, "ESHM_IO", "out of memory reading the path");
+  if (napi_get_value_string_utf8(env, argv[0], path, path_len + 1, &path_len) != napi_ok) {
+    free(path);
     return fail(env, "ESHM_ARG", "path must be a string");
   }
 
   uint64_t data_size = 0;
   if (create) {
     if (argc < 2 || !read_u64_arg(env, argv[1], &data_size) || data_size == 0) {
+      free(path);
       return fail(env, "ESHM_ARG", "dataSize must be a positive integer");
+    }
+    if (data_size > MAX_DATA_SIZE) {
+      free(path);
+      return fail(env, "ESHM_ARG", "dataSize is larger than this transport will map");
     }
   }
 
   Region* r = (Region*)calloc(1, sizeof(Region));
-  if (r == NULL) return fail(env, "ESHM_IO", "out of memory");
+  if (r == NULL) {
+    free(path);
+    return fail(env, "ESHM_IO", "out of memory");
+  }
 #ifndef _WIN32
   r->fd = -1;
 #endif
 
+/* Everything below owns `path` and `r`, so failure goes through one exit rather than
+ * repeating the cleanup at a dozen returns and getting one of them wrong. */
+#define OPEN_FAIL(code, message)        do {                                    region_release(r);                    free(r);                              free(path);                           return fail(env, (code), (message));   } while (0)
+
 #ifdef _WIN32
+  /* The ANSI entry points cannot express a path that is not in the active code page, and
+   * the region lives under userData, which contains the account name. A user called Jose or
+   * Ivan or one writing in any non-Latin script got ESHM_IO at startup and no way to read
+   * why. They also cap at MAX_PATH whatever the manifest says. UTF-16 throughout, from the
+   * UTF-8 that N-API hands over. */
+  int wide_len = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+  if (wide_len <= 0) OPEN_FAIL("ESHM_ARG", "the path is not valid UTF-8");
+  WCHAR* wide = (WCHAR*)malloc((size_t)wide_len * sizeof(WCHAR));
+  if (wide == NULL) OPEN_FAIL("ESHM_IO", "out of memory converting the path");
+  if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, wide_len) <= 0) {
+    free(wide);
+    OPEN_FAIL("ESHM_ARG", "the path is not valid UTF-8");
+  }
+
   /* A reader's mapping is read only, enforced by the OS rather than by convention: no
    * window that attaches can corrupt shared state, whatever else it can do. */
-  HANDLE file = CreateFileA(path, create ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ,
+  HANDLE file = CreateFileW(wide, create ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ,
                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                             create ? OPEN_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  free(wide);
   if (file == INVALID_HANDLE_VALUE) {
-    free(r);
-    return fail(env, "ESHM_IO", create ? "could not create the region file" : "could not open the region file");
+    OPEN_FAIL("ESHM_IO", create ? "could not create the region file" : "could not open the region file");
   }
   if (!create) {
     uint8_t header[HEADER_BYTES];
     DWORD got = 0;
     if (!ReadFile(file, header, HEADER_BYTES, &got, NULL) || got != HEADER_BYTES) {
       CloseHandle(file);
-      free(r);
-      return fail(env, "ESHM_MAGIC", "the file is too small to hold a region header");
+      OPEN_FAIL("ESHM_MAGIC", "the file is too small to hold a region header");
     }
     uint32_t magic, layout;
     memcpy(&magic, header + OFF_MAGIC, 4);
@@ -233,76 +298,91 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
     memcpy(&data_size, header + OFF_DATA_SIZE, 8);
     if (magic != SHM_MAGIC) {
       CloseHandle(file);
-      free(r);
-      return fail(env, "ESHM_MAGIC", "the file is not a region: bad magic");
+      OPEN_FAIL("ESHM_MAGIC", "the file is not a region: bad magic");
     }
     if (layout != SHM_LAYOUT_VERSION) {
       CloseHandle(file);
-      free(r);
-      return fail(env, "ESHM_LAYOUT", "the region uses a layout this build does not understand");
+      OPEN_FAIL("ESHM_LAYOUT", "the region uses a layout this build does not understand");
+    }
+    if (data_size == 0 || data_size > MAX_DATA_SIZE) {
+      CloseHandle(file);
+      OPEN_FAIL("ESHM_LAYOUT", "the region header declares an impossible data size");
+    }
+    /* The header is a claim about the file, not a fact about it. Windows refuses a view
+     * longer than the file, so this is caught either way, but it is caught here with a
+     * message that says what is wrong. */
+    LARGE_INTEGER actual;
+    if (!GetFileSizeEx(file, &actual)) {
+      CloseHandle(file);
+      OPEN_FAIL("ESHM_IO", "could not measure the region file");
+    }
+    if ((uint64_t)actual.QuadPart < HEADER_BYTES + 2ull * data_size) {
+      CloseHandle(file);
+      OPEN_FAIL("ESHM_TRUNCATED", "the region file is shorter than its header declares");
     }
   } else {
     LARGE_INTEGER size;
-    size.QuadPart = (LONGLONG)(HEADER_BYTES + 2u * data_size);
+    size.QuadPart = (LONGLONG)(HEADER_BYTES + 2ull * data_size);
     if (!SetFilePointerEx(file, size, NULL, FILE_BEGIN) || !SetEndOfFile(file)) {
       CloseHandle(file);
-      free(r);
-      return fail(env, "ESHM_IO", "could not size the region file");
+      OPEN_FAIL("ESHM_IO", "could not size the region file");
     }
   }
-  r->mapping = CreateFileMappingA(file, NULL, create ? PAGE_READWRITE : PAGE_READONLY, 0, 0, NULL);
+  r->mapping = CreateFileMappingW(file, NULL, create ? PAGE_READWRITE : PAGE_READONLY, 0, 0, NULL);
   CloseHandle(file);
-  if (r->mapping == NULL) {
-    free(r);
-    return fail(env, "ESHM_IO", "could not create the file mapping");
-  }
+  if (r->mapping == NULL) OPEN_FAIL("ESHM_IO", "could not create the file mapping");
   r->map = (volatile uint8_t*)MapViewOfFile(r->mapping, create ? FILE_MAP_ALL_ACCESS : FILE_MAP_READ,
-                                            0, 0, (SIZE_T)(HEADER_BYTES + 2u * data_size));
+                                            0, 0, (SIZE_T)(HEADER_BYTES + 2ull * data_size));
   if (r->map == NULL) {
     CloseHandle(r->mapping);
-    free(r);
-    return fail(env, "ESHM_IO", "could not map the region");
+    r->mapping = NULL;
+    OPEN_FAIL("ESHM_IO", "could not map the region");
   }
 #else
   /* A reader's mapping is read only, enforced by the OS rather than by convention: no
    * window that attaches can corrupt shared state, whatever else it can do. */
   r->fd = open(path, create ? (O_RDWR | O_CREAT) : O_RDONLY, 0600);
   if (r->fd < 0) {
-    free(r);
-    return fail(env, "ESHM_IO", create ? "could not create the region file" : "could not open the region file");
+    OPEN_FAIL("ESHM_IO", create ? "could not create the region file" : "could not open the region file");
   }
   if (!create) {
     uint8_t header[HEADER_BYTES];
     if (pread(r->fd, header, HEADER_BYTES, 0) != (ssize_t)HEADER_BYTES) {
-      close(r->fd);
-      free(r);
-      return fail(env, "ESHM_MAGIC", "the file is too small to hold a region header");
+      OPEN_FAIL("ESHM_MAGIC", "the file is too small to hold a region header");
     }
     uint32_t magic, layout;
     memcpy(&magic, header + OFF_MAGIC, 4);
     memcpy(&layout, header + OFF_LAYOUT, 4);
     memcpy(&data_size, header + OFF_DATA_SIZE, 8);
     if (magic != SHM_MAGIC) {
-      close(r->fd);
-      free(r);
-      return fail(env, "ESHM_MAGIC", "the file is not a region: bad magic");
+      OPEN_FAIL("ESHM_MAGIC", "the file is not a region: bad magic");
     }
     if (layout != SHM_LAYOUT_VERSION) {
-      close(r->fd);
-      free(r);
-      return fail(env, "ESHM_LAYOUT", "the region uses a layout this build does not understand");
+      OPEN_FAIL("ESHM_LAYOUT", "the region uses a layout this build does not understand");
     }
-  } else if (ftruncate(r->fd, (off_t)(HEADER_BYTES + 2u * data_size)) != 0) {
-    close(r->fd);
-    free(r);
-    return fail(env, "ESHM_IO", "could not size the region file");
+    if (data_size == 0 || data_size > MAX_DATA_SIZE) {
+      OPEN_FAIL("ESHM_LAYOUT", "the region header declares an impossible data size");
+    }
+    /* The header is a claim about the file, not a fact about it, and here the difference is
+     * fatal rather than inconvenient. mmap past end of file succeeds on POSIX and the fault
+     * arrives later, when a reader touches the page, as SIGBUS: a process kill, not an
+     * error any caller can catch and not something ESHM_* can report. A region file
+     * truncated by a full disk or an interrupted copy took down every window that attached.
+     * Everything else in this project fails closed, and so does this now. */
+    struct stat file_info;
+    if (fstat(r->fd, &file_info) != 0) {
+      OPEN_FAIL("ESHM_IO", "could not measure the region file");
+    }
+    if ((uint64_t)file_info.st_size < HEADER_BYTES + 2ull * data_size) {
+      OPEN_FAIL("ESHM_TRUNCATED", "the region file is shorter than its header declares");
+    }
+  } else if (ftruncate(r->fd, (off_t)(HEADER_BYTES + 2ull * data_size)) != 0) {
+    OPEN_FAIL("ESHM_IO", "could not size the region file");
   }
-  void* p = mmap(NULL, HEADER_BYTES + 2u * data_size,
+  void* p = mmap(NULL, HEADER_BYTES + 2ull * data_size,
                  create ? (PROT_READ | PROT_WRITE) : PROT_READ, MAP_SHARED, r->fd, 0);
   if (p == MAP_FAILED) {
-    close(r->fd);
-    free(r);
-    return fail(env, "ESHM_IO", "could not map the region");
+    OPEN_FAIL("ESHM_IO", "could not map the region");
   }
   r->map = (volatile uint8_t*)p;
 #endif
@@ -326,11 +406,11 @@ static napi_value open_region(napi_env env, napi_callback_info info, int create)
 
   napi_value external;
   if (napi_create_external(env, r, finalize_region, NULL, &external) != napi_ok) {
-    region_release(r);
-    free(r);
-    return fail(env, "ESHM_IO", "could not wrap the region");
+    OPEN_FAIL("ESHM_IO", "could not wrap the region");
   }
+  free(path);
   return external;
+#undef OPEN_FAIL
 }
 
 static napi_value Create(napi_env env, napi_callback_info info) {
@@ -415,6 +495,21 @@ static napi_value Flush(napi_env env, napi_callback_info info) {
     }
   }
 
+  /* Grown before the critical section, never inside it. This allocation used to sit
+   * between making the slot sequence odd and making it even again: a failure returned with
+   * the sequence left odd forever, and the next flush read that odd value and stored
+   * sseq + 1, inverting the convention. From then on the sequence was even while the writer
+   * was inside a slot and odd while it was settled, so every reader's bracket read saw a
+   * writer in a slot nothing was writing, spun its whole budget, and returned ESHM_LIVELOCK.
+   * One transient allocation failure bricked the region for the life of the process. */
+  size_t pair_count = range_words / 2;
+  if (pair_count > r->prev_capacity_pairs) {
+    uint32_t* grown = (uint32_t*)realloc(r->prev_ranges, range_words * sizeof(uint32_t));
+    if (grown == NULL) return fail(env, "ESHM_IO", "out of memory tracking ranges");
+    r->prev_ranges = grown;
+    r->prev_capacity_pairs = pair_count;
+  }
+
   uint64_t word = load_word(r);
   uint64_t version = word >> 1;
   uint32_t active = (uint32_t)(word & 1u);
@@ -440,13 +535,8 @@ static napi_value Flush(napi_env env, napi_callback_info info) {
   }
   store_u64(SLOT_VER_PTR(r, inactive), version + 1);
 
-  /* Remember this commit's ranges for the next flush to reapply. */
-  size_t pair_count = range_words / 2;
-  if (pair_count > r->prev_pairs) {
-    uint32_t* grown = (uint32_t*)realloc(r->prev_ranges, range_words * sizeof(uint32_t));
-    if (grown == NULL) return fail(env, "ESHM_IO", "out of memory tracking ranges");
-    r->prev_ranges = grown;
-  }
+  /* Remember this commit's ranges for the next flush to reapply. The buffer is already
+   * large enough, so nothing here can fail and leave the sequence odd. */
   memcpy(r->prev_ranges, pairs, range_words * sizeof(uint32_t));
   r->prev_pairs = pair_count;
 
@@ -481,8 +571,19 @@ static napi_value Sync(napi_env env, napi_callback_info info) {
     return fail(env, "ESHM_BOUNDS", "dest is smaller than the region");
   }
 
-  for (uint32_t attempts = 0; attempts < SYNC_RETRY_CAP; attempts++) {
+  uint64_t deadline = 0;
+  for (uint64_t attempts = 0;; attempts++) {
     if (attempts != 0 && (attempts & 15) == 0) yield_cpu();
+    /* The clock is read rarely and first read lazily, so an uncontended sync, which is
+     * every sync in practice, never touches it at all. */
+    if (attempts != 0 && (attempts % SYNC_ATTEMPTS_PER_CLOCK_CHECK) == 0) {
+      uint64_t now = now_ms();
+      if (deadline == 0) {
+        deadline = now + SYNC_DEADLINE_MS;
+      } else if (now >= deadline) {
+        return fail(env, "ESHM_LIVELOCK", "the writer lapped this copy for longer than sync will wait");
+      }
+    }
     uint32_t s = (uint32_t)(load_word(r) & 1u);
     uint32_t s1 = load_u32(SLOT_SEQ_PTR(r, s));
     if (s1 & 1u) continue;
@@ -500,7 +601,6 @@ static napi_value Sync(napi_env env, napi_callback_info info) {
       return out;
     }
   }
-  return fail(env, "ESHM_LIVELOCK", "the writer lapped this copy repeatedly");
 }
 
 static napi_value Stats(napi_env env, napi_callback_info info) {

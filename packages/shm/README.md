@@ -30,7 +30,11 @@ cannot sustain because it must complete a whole further commit first.
   the first flush makes it readable.
 - A region file carries a magic number and `LAYOUT_VERSION`; attaching to a foreign file or
   a layout this build does not understand fails closed with a typed error (`ESHM_MAGIC`,
-  `ESHM_LAYOUT`). Misuse fails the same way: `ESHM_BOUNDS`, `ESHM_OWNER`, `ESHM_CLOSED`,
+  `ESHM_LAYOUT`). So does a file shorter than the size its own header declares
+  (`ESHM_TRUNCATED`), which matters more than it reads: mapping past end of file succeeds on
+  POSIX and faults later as `SIGBUS`, a process kill no caller can catch, so a region
+  truncated by a full disk or an interrupted copy used to take down every process that
+  attached. Misuse fails the same way: `ESHM_BOUNDS`, `ESHM_OWNER`, `ESHM_CLOSED`,
   `ESHM_LIVELOCK`.
 
 ## Usage

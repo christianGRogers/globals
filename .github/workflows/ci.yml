@@ -71,6 +71,52 @@ jobs:
       - name: read latency
         run: node spikes/run-spike.mjs 04 -- --iterations 300 --batch 1000 --roundTrips 500
 
+  sanitizers:
+    name: address and undefined behaviour sanitizers over the addon
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # addon.c is the only file here that can corrupt memory, and until now nothing
+      # mechanical read it: the fuzzer covers the decoder, the soak covers the protocol
+      # statistically, and neither observes an out of bounds access in the C itself.
+      #
+      # ThreadSanitizer is deliberately absent. It finds races between threads inside one
+      # process, and this transport's concurrency is between separate processes sharing a
+      # mapping, which it cannot observe at all. GCC also refuses to instrument the standalone
+      # fences this protocol is built on. The cross process soak remains the evidence for the
+      # ordering, and it is statistical evidence, which the hardening note should say plainly.
+      - name: build the addon under the sanitizers
+        run: npm run build:native
+        env:
+          CFLAGS: "-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+          LDFLAGS: "-fsanitize=address,undefined"
+      - run: npm run build
+      # Node is not itself built with sanitizers, so the runtime has to be interposed ahead
+      # of it or ASan aborts before the first test. Leak detection stays off for the same
+      # reason: every allocation Node makes and frees at exit would be reported, and none of
+      # them are this addon's.
+      - name: region and cross process tests under the sanitizers
+        run: |
+          export LD_PRELOAD="$(gcc -print-file-name=libasan.so)"
+          node --test packages/shm/dist/test/region.test.js
+          node --test packages/shm/dist/test/cross-process.test.js
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+      - name: a short transport soak under the sanitizers
+        run: |
+          export LD_PRELOAD="$(gcc -print-file-name=libasan.so)"
+          node packages/shm/test/soak/run-soak.mjs --readers 3 --seconds 20
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+
   smoke-soak:
     name: short soak
     runs-on: ubuntu-latest
