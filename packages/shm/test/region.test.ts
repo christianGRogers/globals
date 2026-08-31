@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { closeSync, mkdtempSync, openSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +71,29 @@ test("versions count commits, and version zero means empty", () => {
   for (let i = 1; i <= 5; i++) assert.equal(owner.flush(src, [[0, 16]]), i);
   assert.equal(owner.version(), 5);
   owner.close();
+});
+
+test("a region opens under a path that is not in any ANSI code page", () => {
+  // The reason this test exists is Windows. The region lives under userData, which carries
+  // the account name, and the ANSI entry points cannot express a path outside the active
+  // code page: an accented or non-Latin account name meant ESHM_IO at startup with nothing
+  // explaining it. POSIX passes this either way, so the assertion it is really making is
+  // only checked on one platform, which is worth stating rather than discovering.
+  const awkward = join(dir, "régión-Ωμέγα-世界-🧠");
+  mkdirSync(awkward, { recursive: true });
+  const path = join(awkward, "region.mem");
+
+  const owner = OwnerRegion.create(path, SIZE);
+  const reader = ReaderRegion.attach(path);
+  const src = new Uint8Array(SIZE).fill(0x5a);
+  assert.equal(owner.flush(src), 1);
+
+  const dest = new Uint8Array(SIZE);
+  assert.equal(reader.sync(dest), 1);
+  assert.deepEqual(dest, src);
+
+  owner.close();
+  reader.close();
 });
 
 test("attach refuses a region file shorter than its header declares", () => {
