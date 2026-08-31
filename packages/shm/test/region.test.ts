@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +71,72 @@ test("versions count commits, and version zero means empty", () => {
   for (let i = 1; i <= 5; i++) assert.equal(owner.flush(src, [[0, 16]]), i);
   assert.equal(owner.version(), 5);
   owner.close();
+});
+
+test("attach refuses a region file shorter than its header declares", () => {
+  // Before this was checked, attach believed the header and mmap succeeded past end of
+  // file, so the fault arrived when a reader touched the page: SIGBUS, a process kill that
+  // no caller can catch and ESHM_* cannot report. A full disk or an interrupted copy took
+  // down every window that attached. Verified as a crash before the fix, and this asserts
+  // it is an error after it.
+  const path = regionPath();
+  const owner = OwnerRegion.create(path, SIZE);
+  owner.flush(new Uint8Array(SIZE).fill(0xab));
+  owner.close();
+
+  truncateSync(path, 4096);
+  assert.throws(() => ReaderRegion.attach(path), (error: NodeJS.ErrnoException) => {
+    assert.equal(error.code, "ESHM_TRUNCATED");
+    return true;
+  });
+});
+
+test("attach refuses a header declaring an impossible data size", () => {
+  // The declared size drives the mapping length and the slot arithmetic on top of it, so a
+  // corrupt one has to be rejected before it is believed rather than after.
+  const path = regionPath();
+  const owner = OwnerRegion.create(path, SIZE);
+  owner.close();
+
+  const header = Buffer.alloc(8);
+  header.writeBigUInt64LE((1n << 50n), 0);
+  const handle = openSync(path, "r+");
+  writeSync(handle, header, 0, 8, 16);
+  closeSync(handle);
+
+  assert.throws(() => ReaderRegion.attach(path), (error: NodeJS.ErrnoException) => {
+    assert.equal(error.code, "ESHM_LAYOUT");
+    return true;
+  });
+});
+
+test("a commit smaller than the one before it does not corrupt the range bookkeeping", () => {
+  // The previous-commit ranges are grown before the seqlock section, and the capacity is
+  // tracked apart from the count. Alternating a wide commit with a narrow one exercises
+  // both: the narrow commit must not shrink the buffer the next wide one relies on, and
+  // every commit must still publish exactly what it declared.
+  const path = regionPath();
+  const owner = OwnerRegion.create(path, SIZE);
+  const reader = ReaderRegion.attach(path);
+  const src = new Uint8Array(SIZE);
+  const dest = new Uint8Array(SIZE);
+
+  const wide = Array.from({ length: 12 }, (_, i): [number, number] => [i * 512, 256]);
+  const narrow: [number, number][] = [[0, 8]];
+
+  for (let round = 1; round <= 6; round++) {
+    const ranges = round % 2 === 1 ? wide : narrow;
+    src.fill(round, 0, SIZE);
+    const version = owner.flush(src, ranges);
+    assert.equal(reader.sync(dest), version);
+    for (const [offset, length] of ranges) {
+      assert.equal(dest[offset], round, `round ${round} offset ${offset}`);
+      assert.equal(dest[offset + length - 1], round);
+    }
+  }
+
+  owner.close();
+  reader.close();
 });
 
 test("attach refuses a missing file, a foreign file, and a wrong layout", () => {
