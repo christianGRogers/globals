@@ -29,12 +29,41 @@ interface NativeAddon {
 
 const require_ = createRequire(import.meta.url);
 
+/**
+ * The C library this process runs against, when that distinction matters.
+ *
+ * It matters on Linux and nowhere else. A prebuild named only for platform and
+ * architecture claims to serve every Linux, and a glibc binary loaded on Alpine fails at
+ * the dynamic linker rather than falling through to a build that would have worked. Node
+ * reports the runtime glibc version it linked against, and reports nothing there when it
+ * did not link against one, which is what musl looks like from here.
+ */
+export function libcSuffix(): string {
+  if (process.platform !== "linux") return "";
+  try {
+    const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: string } };
+    return report?.header?.glibcVersionRuntime === undefined ? "-musl" : "";
+  } catch {
+    // A runtime that will not describe itself is treated as the common case rather than
+    // refused: the load below still has to succeed on its own merits.
+    return "";
+  }
+}
+
 function loadAddon(): NativeAddon {
   // A shipped package carries prebuilds per platform and architecture; a working tree
   // carries whatever node-gyp last built. The prebuild wins so that installing never
   // needs a toolchain, and the local build remains the fallback for development.
+  //
+  // On a libc the prebuilds do not cover, the local build is not a fallback, it is the
+  // only route, and the install script is what puts it there.
+  const target = `${process.platform}-${process.arch}`;
+  const suffix = libcSuffix();
   const candidates = [
-    `../../native/prebuilds/${process.platform}-${process.arch}/globals_shm.node`,
+    ...(suffix === "" ? [] : [`../../native/prebuilds/${target}${suffix}/globals_shm.node`]),
+    // A musl runtime must never reach the unsuffixed prebuild: it is a glibc binary, and
+    // loading it fails in a way that reads like a broken package rather than a missing one.
+    ...(suffix === "" ? [`../../native/prebuilds/${target}/globals_shm.node`] : []),
     "../../native/build/Release/globals_shm.node",
   ];
   let cause: unknown;
@@ -46,7 +75,9 @@ function loadAddon(): NativeAddon {
     }
   }
   throw new Error(
-    `the @bradensbay/globals-shm native addon is not available for ${process.platform}-${process.arch}. Run: npm run build:native`,
+    `the @bradensbay/globals-shm native addon is not available for ${target}${suffix}, and it could not be built from source on install. ` +
+      `Building it needs a C toolchain: Python 3 and a compiler (build-essential on Debian, base-devel on Alpine, Xcode command line tools on macOS, Visual Studio Build Tools on Windows). ` +
+      `With one installed, reinstalling this package will compile it.`,
     { cause },
   );
 }
