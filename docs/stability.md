@@ -43,6 +43,21 @@ three. When Electron ships a major, the matrix moves up and the peer range's upp
 moves with it, in the same change. Older majors are not dropped from the peer range,
 because nothing is known to have broken on them; they simply stop being proven.
 
+## Platforms the transport ships binaries for
+
+| Target | How the addon arrives |
+| --- | --- |
+| macOS, Linux, and Windows on x64 and arm64 | A prebuild, so nothing compiles on install |
+| musl systems, Alpine among them | Built from source on install, because a glibc prebuild cannot serve them |
+| Anything else | Built from source on install |
+
+A source build needs Python 3 and a C compiler. Without one the install still succeeds,
+because `npm install` runs in images and build layers that never load this code and failing
+those is worse than an error where the code is actually used; the failure to load then names
+the toolchain to install. On musl the build also depends on the unofficial Node headers host,
+which is less reliable than the official one, and that is a second reason the install does not
+treat a failed build as fatal.
+
 ## Versioning
 
 Semantic versioning, with two layout versions underneath it.

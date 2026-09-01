@@ -117,6 +117,91 @@ jobs:
           ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
           UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
 
+  install-from-a-tarball:
+    name: install the packed package the way a user would
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:native
+      - run: npm run build
+      # The risk register mitigated install friction with prebuilds, a compile fallback, and
+      # "install tested in CI". Only the prebuilds existed. This is the third of those, and
+      # it tests what users actually run: a packed tarball into an empty project.
+      - name: pack, with a prebuild staged as a release would have
+        run: |
+          mkdir -p packages/shm/native/prebuilds/linux-x64 out
+          cp packages/shm/native/build/Release/globals_shm.node packages/shm/native/prebuilds/linux-x64/
+          npm pack --workspace @bradensbay/globals-core --workspace @bradensbay/globals-shm --pack-destination out
+          ls -la out
+      - name: glibc resolves the prebuild and compiles nothing
+        run: |
+          docker run --rm -v "$PWD/out:/in" node:22-bookworm-slim bash -c '
+            set -e
+            mkdir /t && cd /t && npm init -y > /dev/null
+            npm install --no-audit --no-fund /in/*.tgz
+            if [ -e node_modules/@bradensbay/globals-shm/native/build ]; then
+              echo "::error::glibc fell back to a source build when a prebuild was available"
+              exit 1
+            fi
+            node --input-type=module -e "
+              const m = await import(\"@bradensbay/globals-shm\");
+              if (m.LAYOUT_VERSION !== 2) process.exit(1);
+              console.log(\"glibc loaded the prebuild\");
+            "
+          '
+      # musl is the case that was silently broken: the prebuild key carried no libc, so
+      # Alpine resolved the glibc binary and failed at the dynamic linker, which reads like a
+      # corrupt package rather than an unsupported platform.
+      - name: musl with a toolchain builds from source and works
+        run: |
+          docker run --rm -v "$PWD/out:/in" node:22-alpine sh -c '
+            set -e
+            apk add --no-cache python3 make g++ > /dev/null
+            mkdir /t && cd /t && npm init -y > /dev/null
+            npm install --foreground-scripts --no-audit --no-fund /in/*.tgz
+            node --input-type=module -e "
+              const { OwnerRegion, ReaderRegion } = await import(\"@bradensbay/globals-shm\");
+              const size = 1 << 16;
+              const owner = OwnerRegion.create(\"/tmp/ci.region\", size);
+              owner.flush(new Uint8Array(size).fill(0x7e));
+              const reader = ReaderRegion.attach(\"/tmp/ci.region\");
+              const dest = new Uint8Array(size);
+              reader.sync(dest);
+              if (!dest.every((b) => b === 0x7e)) process.exit(1);
+              console.log(\"musl built from source and round tripped\");
+            "
+          '
+      # Without a toolchain the install must still succeed: npm install runs in images and
+      # build layers that never load this code, and taking those down is worse than a clear
+      # error where it is actually needed. The fallback also leans on the musl headers host,
+      # which is less reliable than nodejs.org, so it must never be load bearing.
+      - name: musl without a toolchain installs cleanly and explains itself at load
+        run: |
+          docker run --rm -v "$PWD/out:/in" node:22-alpine sh -c '
+            set -e
+            mkdir /t && cd /t && npm init -y > /dev/null
+            npm install --no-audit --no-fund /in/*.tgz
+            node --input-type=module -e "
+              try {
+                await import(\"@bradensbay/globals-shm\");
+                console.error(\"expected the load to fail without a toolchain\");
+                process.exit(1);
+              } catch (error) {
+                if (!/linux-x64-musl/.test(error.message) || !/toolchain/.test(error.message)) {
+                  console.error(\"the message names neither the platform nor the toolchain:\", error.message);
+                  process.exit(1);
+                }
+                console.log(\"install survived, and the load says what to do\");
+              }
+            "
+          '
+
   smoke-soak:
     name: short soak
     runs-on: ubuntu-latest
