@@ -41,7 +41,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -55,4 +55,4 @@ jobs:
         run: |
           npm ci
           npm run build:native
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
