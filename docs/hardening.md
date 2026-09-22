@@ -118,6 +118,57 @@ root it belongs to.
 That last one is worth dwelling on. A security feature that cries wolf at that rate is worse
 than no feature, because it trains people to ignore it.
 
+## The transport fails closed too
+
+The decoder's fail closed discipline was written for the arena. The transport did not have
+it, and the gap was not academic.
+
+**A truncated region file killed the process.** Attach read the data size out of the header
+and mapped that many bytes without checking the file was that long. Mapping past end of file
+succeeds on POSIX; the fault arrives later, when a reader touches the page, as `SIGBUS`. That
+is a process kill, not an error any caller can catch and not something `ESHM_*` can report,
+so a region left short by a full disk or an interrupted copy took down every process that
+attached. It was reproduced as a crash before it was fixed. Attach now measures the file and
+refuses with `ESHM_TRUNCATED`, and a declared size that could not be mapped at all is refused
+as `ESHM_LAYOUT`.
+
+**A failed allocation could brick a region permanently.** The buffer holding the previous
+commit's ranges was grown inside the seqlock section, after the slot sequence had been made
+odd. An allocation failure returned with it left odd, and the next flush read that odd value
+and stored `sseq + 1`, inverting the convention: from then on the sequence was even while the
+writer was inside a slot and odd while it was settled. Every reader's bracket read saw a
+writer in a slot nothing was writing, spun its whole budget, and returned `ESHM_LIVELOCK`.
+One transient failure, and the region never worked again. The allocation happens before the
+section now, where failing is ordinary.
+
+**Two bounds were bounds on the wrong quantity.** `sync` counted attempts rather than time,
+so its cap allowed minutes of a frozen window before the error arrived; it holds a deadline
+now. The path buffer was fixed at 2048 bytes, and `napi_get_value_string_utf8` reports success
+when it truncates, so an over-long path opened a different file rather than failing.
+
+**Non-ASCII Windows paths could not be opened at all.** The region file lives under
+`userData`, which contains the account name, and the ANSI entry points cannot express a path
+outside the active code page. Anyone whose account name carries an accent or is written in a
+non-Latin script got `ESHM_IO` at startup with nothing to explain it. The path is UTF-16
+throughout now.
+
+### What reads the C mechanically
+
+| Check | Covers | Runs |
+| --- | --- | --- |
+| CodeQL `c-cpp` | The addon, with the compiler observed | Push, pull request, weekly |
+| AddressSanitizer, UndefinedBehaviorSanitizer | Region tests, cross process tests, and a twenty second soak | Every `ci` run |
+
+The sanitizer job is worth reading the caveats on. Node is not built with sanitizers, so leak
+detection is off: only faults in the addon's own code are being asked about. The soak under
+ASan has run 82,219 commits and 35,300 reads with zero torn copies and no sanitizer report.
+
+**ThreadSanitizer is not used, and the reason is not effort.** It finds races between threads
+inside one process. This transport's concurrency is between separate processes sharing a
+mapping, which TSan cannot observe at all, so it would report clean while proving nothing.
+The evidence for the memory ordering remains the cross process soak, and that evidence is
+statistical: many commits, no tear seen. It is a strong result and it is not a proof.
+
 ## Exhaustion and fragmentation
 
 | Situation | Behaviour |
@@ -151,7 +202,7 @@ This library is unusually exposed to Electron internals, so the matrix is not op
 | Axis | Covered |
 | --- | --- |
 | Operating system | Linux, macOS, Windows |
-| Architecture | x64 on all three, arm64 on macOS runners |
+| Architecture | x64 on all three, arm64 on macOS runners; prebuilds cover arm64 on all three |
 | Node | 20 and 22 |
 | Electron | 42, 43, 44, plus a canary on the newest prerelease that warns rather than breaks |
 

@@ -22,8 +22,11 @@ at all.
 npm install @bradensbay/globals
 ```
 
-That is the whole toolchain story: the native transport ships prebuilt for macOS, Linux, and
-Windows on x64 and arm64, so nothing compiles on install.
+That is the whole toolchain story on the six platforms the transport ships prebuilt for:
+macOS, Linux, and Windows on x64 and arm64, where nothing compiles on install. Anywhere else,
+Alpine and other musl systems included, it builds from source at install time and needs a C
+toolchain; if there is not one, the install still succeeds and the error at first use names
+what to install.
 
 **1. The main process is the owner.** Declare the initial state and every write any window
 may request:

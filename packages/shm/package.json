@@ -16,10 +16,12 @@
     "native/prebuilds",
     "native/addon.c",
     "native/binding.gyp",
+    "scripts/install.mjs",
     "README.md"
   ],
   "scripts": {
-    "build:native": "cd native && node-gyp rebuild"
+    "build:native": "cd native && node-gyp rebuild",
+    "install": "node scripts/install.mjs"
   },
   "engines": {
     "node": ">=20.11.0"
