@@ -40,7 +40,7 @@
     "react": "^19.3.0",
     "svelte": "^5.56.10",
     "typescript": "^7.0.2",
-    "vue": "^3.5.42"
+    "vue": "^3.5.43"
   },
   "license": "MIT",
   "repository": {
